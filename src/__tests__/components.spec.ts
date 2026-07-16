@@ -1,0 +1,115 @@
+import { describe, expect, it } from "vitest";
+import { mount } from "@vue/test-utils";
+import ConnectionList from "../components/ConnectionList.vue";
+import DataGrid from "../components/DataGrid.vue";
+import SupabasePanel from "../components/SupabasePanel.vue";
+import TableList from "../components/TableList.vue";
+import type { ConnectionInfo, PolicyInfo, TableInfo } from "../api";
+
+const conns: ConnectionInfo[] = [
+  {
+    id: "1",
+    name: "supabase prod",
+    host: "aws-0-eu-central-1.pooler.supabase.com",
+    port: 6543,
+    user: "postgres.abc",
+    database: "postgres",
+  },
+];
+
+describe("ConnectionList", () => {
+  it("renders connections with detail line", () => {
+    const w = mount(ConnectionList, {
+      props: { connections: conns, activeId: null },
+    });
+    expect(w.text()).toContain("supabase prod");
+    expect(w.text()).toContain("postgres.abc@aws-0-eu-central-1.pooler.supabase.com:6543/postgres");
+  });
+
+  it("emits select", async () => {
+    const w = mount(ConnectionList, {
+      props: { connections: conns, activeId: null },
+    });
+    await w.find("button.name").trigger("click");
+    expect(w.emitted("select")).toEqual([["1"]]);
+  });
+});
+
+const tables: TableInfo[] = [
+  { schema: "public", name: "todos", kind: "BASE TABLE" },
+  { schema: "public", name: "todo_view", kind: "VIEW" },
+];
+
+describe("TableList", () => {
+  it("renders tables, marks views, emits select", async () => {
+    const w = mount(TableList, { props: { tables, active: null } });
+    expect(w.text()).toContain("todos");
+    expect(w.text()).toContain("view");
+    await w.find("button").trigger("click");
+    expect(w.emitted("select")).toEqual([[tables[0]]]);
+  });
+});
+
+describe("DataGrid", () => {
+  it("derives columns from row keys and renders values", () => {
+    const w = mount(DataGrid, {
+      props: {
+        rows: [
+          { id: 1, title: "buy milk", done: false, meta: { a: 1 }, gone: null },
+        ],
+      },
+    });
+    expect(w.findAll("th").map((t) => t.text())).toEqual([
+      "id",
+      "title",
+      "done",
+      "meta",
+      "gone",
+    ]);
+    expect(w.text()).toContain("buy milk");
+    expect(w.text()).toContain('{"a":1}'); // objects JSON-stringified
+    expect(w.text()).toContain("∅"); // null marker
+  });
+
+  it("shows an empty state", () => {
+    const w = mount(DataGrid, { props: { rows: [] } });
+    expect(w.text()).toContain("No rows");
+  });
+});
+
+const policies: PolicyInfo[] = [
+  {
+    schema: "public",
+    table: "todos",
+    name: "own rows",
+    command: "SELECT",
+    roles: "{authenticated}",
+    expression: "(auth.uid() = user_id)",
+  },
+];
+
+describe("SupabasePanel", () => {
+  it("renders policies and auth users", () => {
+    const w = mount(SupabasePanel, {
+      props: {
+        policies,
+        authUsers: [{ id: "u1", email: "a@b.c", createdAt: "2026-01-01" }],
+        authError: "",
+      },
+    });
+    expect(w.text()).toContain("own rows");
+    expect(w.text()).toContain("auth.uid() = user_id");
+    expect(w.text()).toContain("a@b.c");
+  });
+
+  it("shows the auth error instead of the users table", () => {
+    const w = mount(SupabasePanel, {
+      props: {
+        policies: [],
+        authUsers: [],
+        authError: "auth.users not readable — not a Supabase database?",
+      },
+    });
+    expect(w.text()).toContain("not a Supabase database");
+  });
+});
