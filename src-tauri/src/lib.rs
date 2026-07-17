@@ -13,6 +13,7 @@ pub fn run() {
             commands::test_connection,
             commands::list_tables,
             commands::table_rows,
+            commands::run_query,
             commands::list_policies,
             commands::list_auth_users,
         ])

@@ -38,3 +38,21 @@ async fn lists_rls_policies() {
     // Empty on a fresh database — asserting it doesn't error is the point.
     db::list_policies(&pool().await).await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn runs_arbitrary_select_query() {
+    let p = pool().await;
+    let rows = db::run_query(&p, "select 1 as n, 'hi' as s").await.unwrap();
+    assert_eq!(rows, serde_json::json!([{"n": 1, "s": "hi"}]));
+}
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn run_query_surfaces_postgres_errors() {
+    let p = pool().await;
+    let err = db::run_query(&p, "select * from no_such_table_xyz")
+        .await
+        .unwrap_err();
+    assert!(err.contains("no_such_table_xyz"));
+}

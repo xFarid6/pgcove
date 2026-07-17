@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 
-import { listTables, saveConnection, tableRows } from "../api";
+import { listTables, runQuery, saveConnection, tableRows } from "../api";
 
 describe("api wrappers", () => {
   beforeEach(() => invoke.mockReset());
@@ -39,6 +39,15 @@ describe("api wrappers", () => {
       connectionId: "c1",
       schema: "public",
       table: "todos",
+    });
+  });
+
+  it("run_query passes the connection id and sql text", async () => {
+    invoke.mockResolvedValue([]);
+    await runQuery("c1", "select * from todos");
+    expect(invoke).toHaveBeenCalledWith("run_query", {
+      connectionId: "c1",
+      sql: "select * from todos",
     });
   });
 });

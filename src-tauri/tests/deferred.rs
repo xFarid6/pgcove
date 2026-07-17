@@ -2,10 +2,6 @@
 //! implement it — visible via `cargo test -- --ignored --list`.
 
 #[test]
-#[ignore = "not implemented — query editor, see pgcove issue #1"]
-fn runs_arbitrary_sql_from_query_editor() {}
-
-#[test]
 #[ignore = "not implemented — in-grid data editing, see pgcove issue #2"]
 fn updates_a_cell_value_in_grid() {}
 

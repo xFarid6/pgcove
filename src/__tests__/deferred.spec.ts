@@ -3,7 +3,7 @@
 import { describe, test } from "vitest";
 
 describe("deferred features", () => {
-  test.todo("query editor with highlighting + run (issue #1)");
+  test.todo("query editor syntax highlighting (issue #1 follow-up)");
   test.todo("in-grid cell editing with type-aware inputs (issue #2)");
   test.todo("MySQL connection form variant (issue #3)");
   test.todo("SQLite file picker connection (issue #4)");

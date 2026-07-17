@@ -111,6 +111,28 @@ pub async fn table_rows(
         .map_err(|e| e.to_string())
 }
 
+/// Run an arbitrary user query and return the result rows as JSON.
+///
+/// Wraps the statement as `SELECT row_to_json(t) FROM (<query>) t`, the same
+/// trick `table_rows` uses — Postgres serializes every column type for us,
+/// so no client-side type mapping is needed. The tradeoff: this only works
+/// for a single SELECT-shaped statement. INSERT/UPDATE/DELETE/DDL need a
+/// separate execute path returning rows-affected, which is a follow-up.
+pub async fn run_query(pool: &PgPool, sql: &str) -> Result<serde_json::Value, String> {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return Err("empty query".to_string());
+    }
+    let wrapped =
+        format!("SELECT coalesce(json_agg(row_to_json(t)), '[]'::json) FROM ({trimmed}) t");
+    let row = sqlx::query(&wrapped)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    row.try_get::<serde_json::Value, _>(0)
+        .map_err(|e| e.to_string())
+}
+
 /// Row-level-security policies from the real `pg_policies` catalog — the
 /// Supabase panel's data source. A proper RLS editor is issue #6.
 #[derive(Debug, Clone, Serialize)]
@@ -207,5 +229,15 @@ mod tests {
     fn quote_ident_escapes_quotes() {
         assert_eq!(quote_ident("users"), "\"users\"");
         assert_eq!(quote_ident("we\"ird"), "\"we\"\"ird\"");
+    }
+
+    #[tokio::test]
+    async fn run_query_rejects_blank_input() {
+        // connect_lazy doesn't touch the network, so this exercises the
+        // empty-query guard without a real Postgres.
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://u:p@localhost/db")
+            .unwrap();
+        assert_eq!(run_query(&pool, "   ;  ").await.unwrap_err(), "empty query");
     }
 }
