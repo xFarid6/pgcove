@@ -14,9 +14,31 @@ Built with **Tauri v2 + Vue 3 + TypeScript + Rust**
 
 **Status: scaffold.** Working today: connection manager (profiles on disk,
 password/service key in the OS keyring), schema browser (tables/views), table
-data view (`SELECT * … LIMIT 100` rendered in a grid), and a Supabase panel
-reading real data from `pg_policies` and `auth.users`. Everything else is a
-filed issue — see the repo issues for the v1 plan.
+data view (`SELECT * … LIMIT 100` rendered in a grid), a query editor (below),
+and a Supabase panel reading real data from `pg_policies` and `auth.users`.
+Everything else is a filed issue — see the repo issues for the v1 plan.
+
+## Query editor
+
+A plain textarea in the "Query" tab runs a single SELECT-shaped statement and
+renders the result in the same grid the table view uses. **⌘/Ctrl + Enter**
+runs the query; there's also a Run button.
+
+- **What works**: any single `SELECT` (including CTEs/`WITH`) — the backend
+  wraps it as `SELECT row_to_json(t) FROM (<query>) t` server-side, so
+  arbitrary column types decode for free with no client-side type mapping.
+  Zero-row results come back as an empty array, not `null`. A query whose
+  output has duplicate column names (e.g. an unaliased join on two tables
+  that both have an `id` column) is rejected up front with a clear error
+  instead of silently dropping one of the duplicate columns' data — the
+  `row_to_json`/JSON-decode path can't tell two same-named columns apart
+  otherwise.
+- **Known limitation**: `INSERT`/`UPDATE`/`DELETE`/DDL aren't runnable from
+  here yet — the wrapping subquery only accepts SELECT-shaped statements, so
+  those fail with a (readable) Postgres syntax error rather than executing.
+  A separate execute path returning rows-affected is a follow-up.
+- **Not yet**: SQL syntax highlighting (CodeMirror) — deferred to keep the
+  first increment small; the editor is a plain textarea for now.
 
 ## Quickstart (dev)
 

@@ -69,3 +69,36 @@ async fn run_query_rejects_duplicate_column_names() {
         .unwrap_err();
     assert!(err.contains("duplicate column"), "unexpected error: {err}");
 }
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn run_query_returns_empty_array_for_zero_rows() {
+    // coalesce(json_agg(...), '[]'::json) is what keeps this an empty array
+    // instead of SQL NULL — a naive json_agg-only wrapper would decode to
+    // serde_json::Value::Null here instead, breaking a frontend that assumes
+    // it always gets an array back.
+    let p = pool().await;
+    let rows = db::run_query(&p, "select 1 as n where false")
+        .await
+        .unwrap();
+    assert_eq!(rows, serde_json::json!([]));
+}
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn run_query_surfaces_syntax_errors_cleanly() {
+    // A genuine parse error (as opposed to a valid-but-wrong-name error like
+    // run_query_surfaces_postgres_errors above) must still come back as a
+    // readable Err, not a panic — the wrapping subquery is exactly the kind
+    // of place a naive implementation could turn a user typo into a Rust
+    // panic instead of an on-screen message. Postgres error text is
+    // locale-dependent (this dev box reports in Italian), so assert on the
+    // quoted offending token it always includes verbatim rather than on
+    // English wording like "syntax error".
+    let p = pool().await;
+    let err = db::run_query(&p, "selct 1").await.unwrap_err();
+    assert!(
+        !err.is_empty() && err.contains('"'),
+        "expected a specific, readable parse error, got: {err}"
+    );
+}
