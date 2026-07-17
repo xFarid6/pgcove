@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Row};
+use sqlx::{Column, Executor, PgPool, Row, Statement};
 
 use crate::connections::ConnectionInfo;
 
@@ -111,6 +111,56 @@ pub async fn table_rows(
         .map_err(|e| e.to_string())
 }
 
+/// Run an arbitrary user query and return the result rows as JSON.
+///
+/// Wraps the statement as `SELECT row_to_json(t) FROM (<query>) t`, the same
+/// trick `table_rows` uses — Postgres serializes every column type for us,
+/// so no client-side type mapping is needed. The tradeoff: this only works
+/// for a single SELECT-shaped statement. INSERT/UPDATE/DELETE/DDL need a
+/// separate execute path returning rows-affected, which is a follow-up.
+pub async fn run_query(pool: &PgPool, sql: &str) -> Result<serde_json::Value, String> {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return Err("empty query".to_string());
+    }
+    // row_to_json emits one JSON key per output column, including
+    // duplicates verbatim (Postgres's `json` type doesn't dedupe). When that
+    // text is decoded into a serde_json::Value on the way back, duplicate
+    // keys silently collapse to the last one — a self-join or a `SELECT *`
+    // across joined tables sharing a column name (very common: `id`,
+    // `created_at`, ...) would quietly drop data with no error. Describing
+    // the statement first (parse-only, no execution — verified against a
+    // live Postgres that neither DDL nor DML run any side effects here)
+    // lets us catch that before running the wrapped query. If describe
+    // fails for any other reason (bad SQL, non-SELECT shape, ...), ignore
+    // it here and let the real error surface from the actual execution
+    // below, unchanged.
+    if let Ok(stmt) = pool.prepare(trimmed).await {
+        let mut seen = std::collections::HashSet::new();
+        let mut dupes: Vec<&str> = stmt
+            .columns()
+            .iter()
+            .map(|c| c.name())
+            .filter(|name| !seen.insert(*name))
+            .collect();
+        dupes.dedup();
+        if !dupes.is_empty() {
+            return Err(format!(
+                "query has duplicate column name(s) ({}); alias them to disambiguate, e.g. SELECT a.id AS a_id, b.id AS b_id",
+                dupes.join(", ")
+            ));
+        }
+    }
+    let wrapped =
+        format!("SELECT coalesce(json_agg(row_to_json(t)), '[]'::json) FROM ({trimmed}) t");
+    let row = sqlx::query(&wrapped)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    row.try_get::<serde_json::Value, _>(0)
+        .map_err(|e| e.to_string())
+}
+
 /// Row-level-security policies from the real `pg_policies` catalog — the
 /// Supabase panel's data source. A proper RLS editor is issue #6.
 #[derive(Debug, Clone, Serialize)]
@@ -207,5 +257,15 @@ mod tests {
     fn quote_ident_escapes_quotes() {
         assert_eq!(quote_ident("users"), "\"users\"");
         assert_eq!(quote_ident("we\"ird"), "\"we\"\"ird\"");
+    }
+
+    #[tokio::test]
+    async fn run_query_rejects_blank_input() {
+        // connect_lazy doesn't touch the network, so this exercises the
+        // empty-query guard without a real Postgres.
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://u:p@localhost/db")
+            .unwrap();
+        assert_eq!(run_query(&pool, "   ;  ").await.unwrap_err(), "empty query");
     }
 }

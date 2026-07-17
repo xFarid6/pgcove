@@ -54,6 +54,10 @@ export const listTables = (connectionId: string) =>
 export const tableRows = (connectionId: string, schema: string, table: string) =>
   invoke<Row[]>("table_rows", { connectionId, schema, table });
 
+/** Run a single SELECT-shaped statement; other statement kinds are a follow-up. */
+export const runQuery = (connectionId: string, sql: string) =>
+  invoke<Row[]>("run_query", { connectionId, sql });
+
 export const listPolicies = (connectionId: string) =>
   invoke<PolicyInfo[]>("list_policies", { connectionId });
 

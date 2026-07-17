@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import ConnectionList from "../components/ConnectionList.vue";
 import DataGrid from "../components/DataGrid.vue";
+import QueryEditor from "../components/QueryEditor.vue";
 import SupabasePanel from "../components/SupabasePanel.vue";
 import TableList from "../components/TableList.vue";
 import type { ConnectionInfo, PolicyInfo, TableInfo } from "../api";
@@ -74,6 +75,35 @@ describe("DataGrid", () => {
   it("shows an empty state", () => {
     const w = mount(DataGrid, { props: { rows: [] } });
     expect(w.text()).toContain("No rows");
+  });
+});
+
+describe("QueryEditor", () => {
+  it("emits run with the textarea contents", async () => {
+    const w = mount(QueryEditor, { props: { running: false } });
+    await w.find("textarea").setValue("select 1");
+    await w.find("button").trigger("click");
+    expect(w.emitted("run")).toEqual([["select 1"]]);
+  });
+
+  it("does not emit run for blank input", async () => {
+    const w = mount(QueryEditor, { props: { running: false } });
+    await w.find("textarea").setValue("   ");
+    await w.find("button").trigger("click");
+    expect(w.emitted("run")).toBeUndefined();
+  });
+
+  it("disables the run button while running", () => {
+    const w = mount(QueryEditor, { props: { running: true } });
+    expect(w.find("button").attributes("disabled")).toBeDefined();
+    expect(w.find("button").text()).toBe("Running…");
+  });
+
+  it("runs on ctrl/cmd+enter", async () => {
+    const w = mount(QueryEditor, { props: { running: false } });
+    await w.find("textarea").setValue("select 2");
+    await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
+    expect(w.emitted("run")).toEqual([["select 2"]]);
   });
 });
 

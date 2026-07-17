@@ -63,6 +63,16 @@ pub async fn table_rows(
 }
 
 #[tauri::command]
+pub async fn run_query(
+    app: tauri::AppHandle,
+    connection_id: String,
+    sql: String,
+) -> Result<serde_json::Value, String> {
+    let pool = pool_for(&app, &connection_id).await?;
+    db::run_query(&pool, &sql).await
+}
+
+#[tauri::command]
 pub async fn list_policies(
     app: tauri::AppHandle,
     connection_id: String,

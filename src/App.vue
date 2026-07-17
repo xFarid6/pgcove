@@ -6,6 +6,7 @@ import {
   listConnections,
   listPolicies,
   listTables,
+  runQuery,
   saveConnection,
   tableRows,
   testConnection,
@@ -18,6 +19,7 @@ import {
 import ConnectionForm from "./components/ConnectionForm.vue";
 import ConnectionList from "./components/ConnectionList.vue";
 import DataGrid from "./components/DataGrid.vue";
+import QueryEditor from "./components/QueryEditor.vue";
 import SupabasePanel from "./components/SupabasePanel.vue";
 import TableList from "./components/TableList.vue";
 
@@ -29,9 +31,12 @@ const rows = ref<Row[]>([]);
 const policies = ref<PolicyInfo[]>([]);
 const authUsers = ref<AuthUser[]>([]);
 const authError = ref("");
-const tab = ref<"data" | "supabase">("data");
+const tab = ref<"data" | "query" | "supabase">("data");
 const status = ref("");
 const error = ref("");
+const queryRows = ref<Row[]>([]);
+const queryError = ref("");
+const queryRunning = ref(false);
 
 async function refreshConnections() {
   connections.value = await listConnections();
@@ -68,6 +73,20 @@ async function onSelectTable(t: TableInfo) {
   } catch (e) {
     error.value = String(e);
     rows.value = [];
+  }
+}
+
+async function onRunQuery(sql: string) {
+  if (!activeId.value) return;
+  queryRunning.value = true;
+  queryError.value = "";
+  try {
+    queryRows.value = await runQuery(activeId.value, sql);
+  } catch (e) {
+    queryError.value = String(e);
+    queryRows.value = [];
+  } finally {
+    queryRunning.value = false;
   }
 }
 
@@ -128,6 +147,12 @@ onMounted(refreshConnections);
           Data
         </button>
         <button
+          :class="{ active: tab === 'query' }"
+          @click="tab = 'query'"
+        >
+          Query
+        </button>
+        <button
           :class="{ active: tab === 'supabase' }"
           @click="tab = 'supabase'"
         >
@@ -153,6 +178,19 @@ onMounted(refreshConnections);
           v-if="tab === 'data'"
           :rows="rows"
         />
+        <template v-else-if="tab === 'query'">
+          <QueryEditor
+            :running="queryRunning"
+            @run="onRunQuery"
+          />
+          <p
+            v-if="queryError"
+            class="error"
+          >
+            {{ queryError }}
+          </p>
+          <DataGrid :rows="queryRows" />
+        </template>
         <SupabasePanel
           v-else
           :policies="policies"
