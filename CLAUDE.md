@@ -37,3 +37,12 @@ LICENSING.md) — don't add code under incompatible licenses.
 - SQL identifiers must go through `db::quote_ident` — never interpolate raw.
 - Lint gates: `cargo fmt --check`, `cargo clippy -- -D warnings`,
   `pnpm lint`, `pnpm typecheck`.
+
+## Current sprint (2026-07-17 → 2026-07-30)
+
+Full plan: Obsidian vault → `Claude-understandings/ship-and-sell-plan.md`
+(strategy) + `01-two-week-sprint.md` (timeline). pgcove's role this sprint:
+**agent-maintained, no release pressure** — progress the query editor (issue #1),
+keep CI green. Beta targeted ~October at €39 one-time (€29 intro), the
+Supabase-first angle (RLS/auth) is the differentiator — see
+`03-monetization-decisions.md` in the vault.
