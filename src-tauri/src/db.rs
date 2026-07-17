@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Row};
+use sqlx::{Column, Executor, PgPool, Row, Statement};
 
 use crate::connections::ConnectionInfo;
 
@@ -122,6 +122,34 @@ pub async fn run_query(pool: &PgPool, sql: &str) -> Result<serde_json::Value, St
     let trimmed = sql.trim().trim_end_matches(';').trim();
     if trimmed.is_empty() {
         return Err("empty query".to_string());
+    }
+    // row_to_json emits one JSON key per output column, including
+    // duplicates verbatim (Postgres's `json` type doesn't dedupe). When that
+    // text is decoded into a serde_json::Value on the way back, duplicate
+    // keys silently collapse to the last one — a self-join or a `SELECT *`
+    // across joined tables sharing a column name (very common: `id`,
+    // `created_at`, ...) would quietly drop data with no error. Describing
+    // the statement first (parse-only, no execution — verified against a
+    // live Postgres that neither DDL nor DML run any side effects here)
+    // lets us catch that before running the wrapped query. If describe
+    // fails for any other reason (bad SQL, non-SELECT shape, ...), ignore
+    // it here and let the real error surface from the actual execution
+    // below, unchanged.
+    if let Ok(stmt) = pool.prepare(trimmed).await {
+        let mut seen = std::collections::HashSet::new();
+        let mut dupes: Vec<&str> = stmt
+            .columns()
+            .iter()
+            .map(|c| c.name())
+            .filter(|name| !seen.insert(*name))
+            .collect();
+        dupes.dedup();
+        if !dupes.is_empty() {
+            return Err(format!(
+                "query has duplicate column name(s) ({}); alias them to disambiguate, e.g. SELECT a.id AS a_id, b.id AS b_id",
+                dupes.join(", ")
+            ));
+        }
     }
     let wrapped =
         format!("SELECT coalesce(json_agg(row_to_json(t)), '[]'::json) FROM ({trimmed}) t");

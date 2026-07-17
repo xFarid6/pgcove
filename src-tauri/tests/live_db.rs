@@ -56,3 +56,16 @@ async fn run_query_surfaces_postgres_errors() {
         .unwrap_err();
     assert!(err.contains("no_such_table_xyz"));
 }
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn run_query_rejects_duplicate_column_names() {
+    // row_to_json emits duplicate JSON keys verbatim; decoding that into
+    // serde_json::Value silently keeps only the last one. Catching this up
+    // front beats quietly dropping a column's data — see db::run_query.
+    let p = pool().await;
+    let err = db::run_query(&p, "select 1 as id, 2 as id")
+        .await
+        .unwrap_err();
+    assert!(err.contains("duplicate column"), "unexpected error: {err}");
+}
