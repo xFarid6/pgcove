@@ -16,6 +16,13 @@ jobs:
   secrets:
     name: secrets
     runs-on: ubuntu-latest
+    # gitleaks-action calls the PR-commits API to scan a `pull_request`
+    # event's diff; without this it 403s ("Resource not accessible by
+    # integration") on every PR, since the default GITHUB_TOKEN doesn't
+    # carry pull-requests:read unless a job declares it explicitly.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
