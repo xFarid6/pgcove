@@ -49,17 +49,24 @@ async function onSelect(id: string) {
   error.value = "";
   try {
     tables.value = await listTables(id);
-    policies.value = await listPolicies(id);
-    try {
-      authUsers.value = await listAuthUsers(id);
-      authError.value = "";
-    } catch (e) {
-      authUsers.value = [];
-      authError.value = `auth.users not readable — not a Supabase database? (${e})`;
-    }
   } catch (e) {
     error.value = String(e);
     tables.value = [];
+    return;
+  }
+  // Policies/auth users are a Postgres/Supabase-only feature (SQLite errors
+  // on both) — failing here shouldn't wipe out the tables list above.
+  try {
+    policies.value = await listPolicies(id);
+  } catch {
+    policies.value = [];
+  }
+  try {
+    authUsers.value = await listAuthUsers(id);
+    authError.value = "";
+  } catch (e) {
+    authUsers.value = [];
+    authError.value = `auth.users not readable — not a Supabase database? (${e})`;
   }
 }
 

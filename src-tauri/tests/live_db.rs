@@ -6,12 +6,15 @@
 //! PGCOVE_TEST_URL=postgres://user:pass@host:5432/db cargo test -- --ignored
 //! ```
 
+use pgcove_lib::connections::DbKind;
 use pgcove_lib::db;
 
-async fn pool() -> sqlx::PgPool {
+async fn pool() -> db::Db {
     let url = std::env::var("PGCOVE_TEST_URL")
         .expect("set PGCOVE_TEST_URL=postgres://user:pass@host:5432/db");
-    db::connect(&url).await.expect("connect failed")
+    db::connect(DbKind::Postgres, &url)
+        .await
+        .expect("connect failed")
 }
 
 #[tokio::test]

@@ -2,9 +2,14 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+export type DbKind = "postgres" | "sqlite";
+
 export interface ConnectionInfo {
   id: string;
   name: string;
+  /** Defaults to "postgres" server-side if omitted. */
+  kind?: DbKind;
+  /** Ignored for "sqlite" — only `database` (the file path, or ":memory:") is used. */
   host: string;
   port: number;
   user: string;

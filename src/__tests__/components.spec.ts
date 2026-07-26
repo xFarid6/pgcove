@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
+import ConnectionForm from "../components/ConnectionForm.vue";
 import ConnectionList from "../components/ConnectionList.vue";
 import DataGrid from "../components/DataGrid.vue";
 import QueryEditor from "../components/QueryEditor.vue";
@@ -33,6 +34,54 @@ describe("ConnectionList", () => {
     });
     await w.find("button.name").trigger("click");
     expect(w.emitted("select")).toEqual([["1"]]);
+  });
+
+  it("shows just the file path for a SQLite connection", () => {
+    const sqliteConn: ConnectionInfo = {
+      id: "2",
+      name: "local.db",
+      kind: "sqlite",
+      host: "",
+      port: 0,
+      user: "",
+      database: "/home/me/local.db",
+    };
+    const w = mount(ConnectionList, {
+      props: { connections: [sqliteConn], activeId: null },
+    });
+    expect(w.text()).toContain("/home/me/local.db");
+    expect(w.text()).not.toContain("@:0");
+  });
+});
+
+describe("ConnectionForm", () => {
+  it("submits a Postgres connection by default", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("input[placeholder^='Name']").setValue("prod");
+    await w.find("form").trigger("submit");
+    const [info, password] = w.emitted("save")![0] as [ConnectionInfo, string | undefined];
+    expect(info.kind).toBe("postgres");
+    expect(info.host).toBe("localhost");
+    expect(password).toBeUndefined();
+  });
+
+  it("switches to a file-path field and submits a SQLite connection", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("select").setValue("sqlite");
+    await w.find("input[placeholder='Name (e.g. supabase prod)']").setValue("local.db");
+    await w.find("input[placeholder^='File path']").setValue("/tmp/local.db");
+    await w.find("form").trigger("submit");
+    const [info] = w.emitted("save")![0] as [ConnectionInfo, string | undefined];
+    expect(info.kind).toBe("sqlite");
+    expect(info.database).toBe("/tmp/local.db");
+  });
+
+  it("does not submit a SQLite connection without a file path", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("select").setValue("sqlite");
+    await w.find("input[placeholder='Name (e.g. supabase prod)']").setValue("local.db");
+    await w.find("form").trigger("submit");
+    expect(w.emitted("save")).toBeUndefined();
   });
 });
 
