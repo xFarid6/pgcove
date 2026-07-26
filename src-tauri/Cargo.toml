@@ -26,12 +26,17 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 # Supabase HTTP APIs (issue #5). rustls here too — no native-tls/OpenSSL.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset", "json"] }
 tokio = { version = "1", features = ["macros", "sync", "time"] }
-# Same keyring setup as proxmox-desktop / dockshell.
+# Same keyring setup as proxmox-desktop / dockshell. Used directly for the
+# secondary secrets (Supabase service key, SSH tunnel secret) that
+# conn-manager's single-secret-per-profile model doesn't cover.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 # SSH tunnel connections (issue #11). Same setup as hopline sibling: ring
 # backend needs no NASM on Windows, async-trait works around a Send-not-
 # general-enough inference error on publickey auth.
 russh = { version = "0.54", default-features = false, features = ["flate2", "ring", "async-trait"] }
+# Shared profile-store + keyring crate (issue #14); connections.rs is a thin
+# adapter over it for the profile file + primary password.
+conn-manager = { git = "https://github.com/xFarid6/conn-manager-rs", branch = "main" }
 
 [dev-dependencies]
 tempfile = "3"

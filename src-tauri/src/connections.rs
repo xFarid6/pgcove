@@ -1,12 +1,10 @@
-//! Saved database connections. Non-secret fields live in a JSON file in the
-//! app config dir; the password (or Supabase service key) lives only in the
-//! OS keyring — never on disk, never logged.
-//!
-//! Same pattern as proxmox-desktop/dockshell `connections.rs`; extraction
-//! into a shared crate is issue #14.
+//! Saved database connections. Thin adapter over the shared `conn-manager`
+//! crate (issue #14): non-secret fields live in a JSON file in the app
+//! config dir; the password (or Supabase service key) lives only in the OS
+//! keyring — never on disk, never logged.
 
+use conn_manager::{Profile, ProfileStore};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 const KEYRING_SERVICE: &str = "pgcove";
@@ -83,39 +81,36 @@ pub enum SshAuth {
     Password,
 }
 
+impl Profile for ConnectionInfo {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+fn store(dir: &Path) -> ProfileStore {
+    ProfileStore::new(dir.to_path_buf(), KEYRING_SERVICE)
+}
+
+/// Matches conn-manager's own `store_file` naming — only used by tests here
+/// to assert on the raw JSON, not by any non-test code path.
+#[cfg(test)]
 fn store_file(dir: &Path) -> PathBuf {
     dir.join("connections.json")
 }
 
 pub fn load(dir: &Path) -> Result<Vec<ConnectionInfo>, String> {
-    let path = store_file(dir);
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&raw).map_err(|e| e.to_string())
-}
-
-fn save_all(dir: &Path, conns: &[ConnectionInfo]) -> Result<(), String> {
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let raw = serde_json::to_string_pretty(conns).map_err(|e| e.to_string())?;
-    fs::write(store_file(dir), raw).map_err(|e| e.to_string())
+    store(dir).load().map_err(|e| e.to_string())
 }
 
 pub fn get(dir: &Path, id: &str) -> Result<ConnectionInfo, String> {
-    load(dir)?
-        .into_iter()
-        .find(|c| c.id == id)
-        .ok_or_else(|| format!("unknown connection: {id}"))
-}
-
-fn secret_entry(id: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, id).map_err(|e| e.to_string())
+    store(dir).get(id).map_err(|e| e.to_string())
 }
 
 /// Keyring account for a connection's Supabase service-role key. Same service
 /// and same `keyring::Entry` mechanism as the password — only the account
-/// name differs, so one connection can hold both secrets.
+/// name differs, so one connection can hold both secrets. conn-manager's
+/// `ProfileStore` only covers one secret per profile id, so the secondary
+/// secrets (this and `ssh_secret_entry`) still go through `keyring` directly.
 fn service_key_account(id: &str) -> String {
     format!("{id}#supabase-service-key")
 }
@@ -134,8 +129,13 @@ fn ssh_secret_entry(id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYRING_SERVICE, &ssh_secret_account(id)).map_err(|e| e.to_string())
 }
 
+/// `get_password` needs no profile-store directory — the secret lives only
+/// in the keyring — so it builds a `ProfileStore` with an unused, never-read
+/// dir.
 pub fn get_password(id: &str) -> Result<String, String> {
-    secret_entry(id)?.get_password().map_err(|e| e.to_string())
+    store(&PathBuf::new())
+        .get_secret(id)
+        .map_err(|e| e.to_string())
 }
 
 pub fn get_service_key(id: &str) -> Result<String, String> {
@@ -152,6 +152,9 @@ pub fn get_ssh_secret(id: &str) -> Result<String, String> {
 
 /// Upsert a connection; `password`, `service_key` and `ssh_secret` are
 /// written to the keyring when provided (add, or edit that changes them).
+/// `password` and the profile file go through conn-manager's `ProfileStore`;
+/// `service_key`/`ssh_secret` are secondary secrets it doesn't model, so they
+/// go straight to `keyring`.
 pub fn save(
     dir: &Path,
     info: ConnectionInfo,
@@ -159,11 +162,6 @@ pub fn save(
     service_key: Option<String>,
     ssh_secret: Option<String>,
 ) -> Result<(), String> {
-    if let Some(p) = password {
-        secret_entry(&info.id)?
-            .set_password(&p)
-            .map_err(|e| e.to_string())?;
-    }
     if let Some(k) = service_key {
         service_key_entry(&info.id)?
             .set_password(&k)
@@ -174,33 +172,26 @@ pub fn save(
             .set_password(&s)
             .map_err(|e| e.to_string())?;
     }
-    let mut conns = load(dir)?;
-    match conns.iter_mut().find(|c| c.id == info.id) {
-        Some(existing) => *existing = info,
-        None => conns.push(info),
-    }
-    save_all(dir, &conns)
+    store(dir).save(info, password).map_err(|e| e.to_string())
 }
 
 pub fn delete(dir: &Path, id: &str) -> Result<(), String> {
     // Best effort — the entries may already be gone.
-    if let Ok(entry) = secret_entry(id) {
-        let _ = entry.delete_credential();
-    }
     if let Ok(entry) = service_key_entry(id) {
         let _ = entry.delete_credential();
     }
     if let Ok(entry) = ssh_secret_entry(id) {
         let _ = entry.delete_credential();
     }
-    let mut conns = load(dir)?;
-    conns.retain(|c| c.id != id);
-    save_all(dir, &conns)
+    store(dir)
+        .delete::<ConnectionInfo>(id)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn conn(id: &str) -> ConnectionInfo {
         ConnectionInfo {
@@ -234,6 +225,12 @@ mod tests {
 
         delete(dir.path(), "a").unwrap();
         assert!(get(dir.path(), "a").is_err());
+    }
+
+    #[test]
+    fn unknown_connection_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(get(dir.path(), "nope").is_err());
     }
 
     #[test]
