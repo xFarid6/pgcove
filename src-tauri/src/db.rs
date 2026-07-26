@@ -3,9 +3,10 @@
 //! editor (issue #1) and in-grid editing (issue #2) will need real typing.
 
 use serde::{Deserialize, Serialize};
+use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{Column, Executor, PgPool, Row, SqlitePool, Statement};
+use sqlx::{Column, Executor, MySqlPool, PgPool, Row, SqlitePool, Statement};
 
 use crate::connections::{ConnectionInfo, DbKind};
 
@@ -14,6 +15,7 @@ use crate::connections::{ConnectionInfo, DbKind};
 pub enum Db {
     Postgres(PgPool),
     Sqlite(SqlitePool),
+    MySql(MySqlPool),
 }
 
 /// Percent-encode userinfo parts of a connection URL (user/password can
@@ -35,6 +37,8 @@ fn encode_userinfo(s: &str) -> String {
 /// plaintext for local dev servers without it. SQLite ignores host/port/user
 /// entirely — `database` is the file path (or `:memory:`), and `?mode=rwc`
 /// creates the file on first connect instead of erroring if it's missing.
+/// MySQL gets a plain URL — no Supabase-style managed MySQL to accommodate,
+/// and sqlx's mysql driver negotiates TLS with the server on its own.
 pub fn connection_url(info: &ConnectionInfo, password: &str) -> String {
     match info.kind {
         DbKind::Postgres => format!(
@@ -52,6 +56,14 @@ pub fn connection_url(info: &ConnectionInfo, password: &str) -> String {
                 format!("sqlite://{}?mode=rwc", info.database)
             }
         }
+        DbKind::MySql => format!(
+            "mysql://{}:{}@{}:{}/{}",
+            encode_userinfo(&info.user),
+            encode_userinfo(password),
+            info.host,
+            info.port,
+            encode_userinfo(&info.database),
+        ),
     }
 }
 
@@ -76,6 +88,12 @@ pub async fn connect(kind: DbKind, url: &str) -> Result<Db, String> {
                 .map(Db::Sqlite)
                 .map_err(|e| e.to_string())
         }
+        DbKind::MySql => MySqlPoolOptions::new()
+            .max_connections(2)
+            .connect(url)
+            .await
+            .map(Db::MySql)
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -90,6 +108,13 @@ pub async fn server_version(db: &Db) -> Result<String, String> {
         }
         Db::Sqlite(pool) => {
             let row = sqlx::query("SELECT sqlite_version()")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            row.try_get::<String, _>(0).map_err(|e| e.to_string())
+        }
+        Db::MySql(pool) => {
+            let row = sqlx::query("SELECT VERSION()")
                 .fetch_one(pool)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -184,10 +209,31 @@ pub async fn list_tables(db: &Db) -> Result<Vec<TableInfo>, String> {
                 })
                 .collect()
         }
+        Db::MySql(pool) => {
+            let rows = sqlx::query(
+                "SELECT table_schema, table_name, table_type
+                 FROM information_schema.tables
+                 WHERE table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+                 ORDER BY table_schema, table_name",
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            rows.iter()
+                .map(|r| {
+                    Ok(TableInfo {
+                        schema: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                        name: r.try_get(1).map_err(|e: sqlx::Error| e.to_string())?,
+                        kind: r.try_get(2).map_err(|e: sqlx::Error| e.to_string())?,
+                    })
+                })
+                .collect()
+        }
     }
 }
 
-/// Double-quote a SQL identifier, escaping embedded quotes.
+/// Double-quote a SQL identifier, escaping embedded quotes. Postgres only —
+/// MySQL uses `quote_ident_mysql` (backticks) instead.
 pub fn quote_ident(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\"\""))
 }
@@ -212,8 +258,14 @@ pub struct RowsPage {
     pub rows: serde_json::Value,
     /// `pg_class.reltuples` on Postgres — a fast estimate, not an exact
     /// count, and 0 for a freshly created table that hasn't been analyzed
-    /// yet. SQLite uses a real `COUNT(*)`, fine at dev-db scale.
+    /// yet. SQLite and MySQL use a real `COUNT(*)`, fine at dev-db scale.
     pub approx_total: i64,
+}
+
+/// Backtick-quote a SQL identifier, escaping embedded backticks (MySQL's
+/// quoting rule, as opposed to Postgres's double quotes).
+fn quote_ident_mysql(s: &str) -> String {
+    format!("`{}`", s.replace('`', "``"))
 }
 
 /// One page of a table's rows as a JSON array of objects, plus an
@@ -302,6 +354,87 @@ pub async fn table_rows(
 
             Ok(RowsPage { rows, approx_total })
         }
+        // MySQL has no `row_to_json` equivalent, so the column list is
+        // fetched first and a `JSON_OBJECT(...)` is built by hand, casting
+        // every value to `CHAR` the same way the Postgres path casts
+        // metadata columns to `text` — one server-side cast rule instead of
+        // per-type client-side mapping.
+        Db::MySql(pool) => {
+            let cols: Vec<String> =
+                sqlx::query_scalar("SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position")
+                    .bind(schema)
+                    .bind(table)
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            if cols.is_empty() {
+                return Ok(RowsPage {
+                    rows: serde_json::json!([]),
+                    approx_total: 0,
+                });
+            }
+            let fields = cols
+                .iter()
+                .map(|c| {
+                    format!(
+                        "'{}', CAST({} AS CHAR)",
+                        c.replace('\'', "''"),
+                        quote_ident_mysql(c)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            // Filtering casts every column to CHAR too — same one-cast-rule
+            // approach as the field list above, so `filter_column` doesn't
+            // need per-type handling.
+            let where_clause = filter_col
+                .map(|c| {
+                    format!(
+                        " WHERE CAST({} AS CHAR) LIKE CONCAT('%', ?, '%')",
+                        quote_ident_mysql(c)
+                    )
+                })
+                .unwrap_or_default();
+            let order_clause_mysql = query
+                .order_by
+                .as_deref()
+                .filter(|c| !c.trim().is_empty())
+                .map(|c| {
+                    format!(
+                        " ORDER BY {} {}",
+                        quote_ident_mysql(c),
+                        if query.order_desc { "DESC" } else { "ASC" }
+                    )
+                })
+                .unwrap_or_default();
+            let sql = format!(
+                "SELECT coalesce(JSON_ARRAYAGG(JSON_OBJECT({fields})), JSON_ARRAY())
+                 FROM (SELECT * FROM {}.{}{where_clause}{order_clause_mysql} LIMIT {page_size} OFFSET {offset}) x",
+                quote_ident_mysql(schema),
+                quote_ident_mysql(table),
+            );
+            let mut q = sqlx::query(&sql);
+            if !where_clause.is_empty() {
+                q = q.bind(query.filter_value.clone().unwrap_or_default());
+            }
+            let row = q.fetch_one(pool).await.map_err(|e| e.to_string())?;
+            let rows = row
+                .try_get::<serde_json::Value, _>(0)
+                .map_err(|e| e.to_string())?;
+
+            let count_sql = format!(
+                "SELECT COUNT(*) FROM {}.{}{where_clause}",
+                quote_ident_mysql(schema),
+                quote_ident_mysql(table),
+            );
+            let mut cq = sqlx::query_scalar::<_, i64>(&count_sql);
+            if !where_clause.is_empty() {
+                cq = cq.bind(query.filter_value.clone().unwrap_or_default());
+            }
+            let approx_total = cq.fetch_one(pool).await.map_err(|e| e.to_string())?;
+
+            Ok(RowsPage { rows, approx_total })
+        }
     }
 }
 
@@ -379,6 +512,12 @@ pub async fn run_query(db: &Db, sql: &str) -> Result<serde_json::Value, String> 
             }
             sqlite_rows_to_json(pool, trimmed).await
         }
+        // Not part of issue #3's scope (connections, table listing, data
+        // grid) — the query editor is issue #1, MySQL parity for it is a
+        // follow-up.
+        Db::MySql(_) => {
+            Err("the query editor isn't supported for MySQL connections yet".to_string())
+        }
     }
 }
 
@@ -398,7 +537,7 @@ pub struct PolicyInfo {
 pub async fn list_policies(db: &Db) -> Result<Vec<PolicyInfo>, String> {
     let pool = match db {
         Db::Postgres(pool) => pool,
-        Db::Sqlite(_) => {
+        Db::Sqlite(_) | Db::MySql(_) => {
             return Err("row-level security policies are a Postgres/Supabase feature".to_string())
         }
     };
@@ -530,6 +669,11 @@ pub async fn execute_ddl(db: &Db, sql: &str) -> Result<(), String> {
             .await
             .map(|_| ())
             .map_err(|e| e.to_string()),
+        Db::MySql(pool) => sqlx::query(sql)
+            .execute(pool)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -547,7 +691,7 @@ pub struct AuthUser {
 pub async fn list_auth_users(db: &Db) -> Result<Vec<AuthUser>, String> {
     let pool = match db {
         Db::Postgres(pool) => pool,
-        Db::Sqlite(_) => {
+        Db::Sqlite(_) | Db::MySql(_) => {
             return Err("Supabase auth users are a Postgres/Supabase feature".to_string())
         }
     };
@@ -613,7 +757,9 @@ pub struct TableStructure {
 pub async fn table_structure(db: &Db, schema: &str, table: &str) -> Result<TableStructure, String> {
     let pool = match db {
         Db::Postgres(pool) => pool,
-        Db::Sqlite(_) => return Err("table structure is a Postgres/Supabase feature".to_string()),
+        Db::Sqlite(_) | Db::MySql(_) => {
+            return Err("table structure is a Postgres/Supabase feature".to_string())
+        }
     };
 
     let column_rows = sqlx::query(
@@ -749,9 +895,24 @@ mod tests {
     }
 
     #[test]
+    fn connection_url_uses_mysql_scheme_without_sslmode() {
+        let url = connection_url(&info(DbKind::MySql), "p@ss:w/rd%");
+        assert_eq!(
+            url,
+            "mysql://postgres.abc123:p%40ss%3Aw%2Frd%25@db.example.com:6543/postgres"
+        );
+    }
+
+    #[test]
     fn quote_ident_escapes_quotes() {
         assert_eq!(quote_ident("users"), "\"users\"");
         assert_eq!(quote_ident("we\"ird"), "\"we\"\"ird\"");
+    }
+
+    #[test]
+    fn quote_ident_mysql_escapes_backticks() {
+        assert_eq!(quote_ident_mysql("users"), "`users`");
+        assert_eq!(quote_ident_mysql("we`ird"), "`we``ird`");
     }
 
     fn draft() -> PolicyDraft {
@@ -994,5 +1155,15 @@ mod tests {
             .await
             .unwrap_err()
             .contains("Postgres"));
+    }
+
+    #[tokio::test]
+    async fn run_query_rejects_mysql_for_now() {
+        let pool = MySqlPoolOptions::new()
+            .connect_lazy("mysql://u:p@localhost/db")
+            .unwrap();
+        let db = Db::MySql(pool);
+        let err = run_query(&db, "select 1").await.unwrap_err();
+        assert!(err.contains("MySQL"), "unexpected error: {err}");
     }
 }

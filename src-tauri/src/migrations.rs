@@ -33,7 +33,9 @@ struct MigrationFile {
 fn pg_pool(db: &Db) -> Result<&PgPool, String> {
     match db {
         Db::Postgres(pool) => Ok(pool),
-        Db::Sqlite(_) => Err("migrations tracking is a Postgres/Supabase feature".to_string()),
+        Db::Sqlite(_) | Db::MySql(_) => {
+            Err("migrations tracking is a Postgres/Supabase feature".to_string())
+        }
     }
 }
 
