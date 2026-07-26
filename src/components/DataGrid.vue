@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import type { Row } from "../api";
 import { downloadFile, rowsToCsv, rowsToJson } from "../export";
 
@@ -13,14 +13,25 @@ const props = withDefaults(
     approxTotal?: number;
     sortColumn?: string;
     sortDesc?: boolean;
+    editable?: boolean;
+    pkColumns?: string[];
   }>(),
-  { pageable: false, page: 1, pageSize: 50, approxTotal: 0, sortColumn: "", sortDesc: false },
+  {
+    pageable: false,
+    page: 1,
+    pageSize: 50,
+    approxTotal: 0,
+    sortColumn: "",
+    sortDesc: false,
+    pkColumns: () => [],
+  },
 );
 
 const emit = defineEmits<{
   sort: [column: string];
   page: [page: number];
   filter: [column: string, value: string];
+  edit: [rowIndex: number, column: string, value: string];
 }>();
 
 // Cached rather than a plain computed so the header/filter list survives a
@@ -44,6 +55,9 @@ function pageCount(): number {
   return Math.max(1, Math.ceil(props.approxTotal / props.pageSize));
 }
 
+// A table without a primary key has no reliable WHERE clause for an UPDATE.
+const canEdit = computed(() => !!props.editable && (props.pkColumns?.length ?? 0) > 0);
+
 function cell(v: unknown): string {
   if (v === null || v === undefined) return "∅";
   if (typeof v === "object") return JSON.stringify(v);
@@ -56,6 +70,26 @@ function exportCsv() {
 
 function exportJson() {
   downloadFile("export.json", rowsToJson(props.rows), "application/json;charset=utf-8");
+}
+
+const editing = ref<{ row: number; col: string } | null>(null);
+const editValue = ref("");
+
+function startEdit(rowIndex: number, col: string, current: unknown) {
+  if (!canEdit.value) return;
+  editing.value = { row: rowIndex, col };
+  editValue.value = current === null || current === undefined ? "" : cell(current);
+}
+
+function commitEdit() {
+  if (!editing.value) return;
+  const { row, col } = editing.value;
+  emit("edit", row, col, editValue.value);
+  editing.value = null;
+}
+
+function cancelEdit() {
+  editing.value = null;
 }
 </script>
 
@@ -142,9 +176,22 @@ function exportJson() {
           <td
             v-for="c in columns"
             :key="c"
-            :class="{ null: r[c] === null }"
+            :class="{ null: r[c] === null, editable: canEdit }"
+            @dblclick="startEdit(i, c, r[c])"
           >
-            {{ cell(r[c]) }}
+            <input
+              v-if="editing && editing.row === i && editing.col === c"
+              v-model="editValue"
+              class="cell-input"
+              autofocus
+              @keydown.enter="commitEdit"
+              @keydown.escape="cancelEdit"
+              @blur="commitEdit"
+              @click.stop
+            >
+            <template v-else>
+              {{ cell(r[c]) }}
+            </template>
           </td>
         </tr>
       </tbody>
@@ -191,6 +238,18 @@ th.sortable {
 }
 td.null {
   opacity: 0.4;
+}
+td.editable {
+  cursor: text;
+}
+.cell-input {
+  width: 100%;
+  font: inherit;
+  padding: 0;
+  border: 1px solid #34a06f;
+  border-radius: 3px;
+  background-color: #252a30;
+  color: inherit;
 }
 .empty {
   opacity: 0.6;

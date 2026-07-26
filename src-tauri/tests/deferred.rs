@@ -1,10 +1,6 @@
 //! Deferred-feature test surface. Each stub names the GitHub issue that will
 //! implement it — visible via `cargo test -- --ignored --list`.
 
-#[test]
-#[ignore = "not implemented — in-grid data editing, see pgcove issue #2"]
-fn updates_a_cell_value_in_grid() {}
-
 // Issue #5 (Supabase project connections) shipped: project info and storage
 // bucket listing over the project URL + service-role key are covered for real
 // by the unit tests in src/supabase.rs (URL/header construction and response

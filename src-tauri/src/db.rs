@@ -521,6 +521,148 @@ pub async fn run_query(db: &Db, sql: &str) -> Result<serde_json::Value, String> 
     }
 }
 
+/// Primary-key column names for a table, in ordinal order. Empty means the
+/// table has no primary key — the frontend must keep it read-only, since
+/// `update_cell` below has no reliable WHERE clause without one.
+pub async fn primary_key_columns(
+    db: &Db,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<String>, String> {
+    let pool = match db {
+        Db::Postgres(pool) => pool,
+        Db::Sqlite(_) | Db::MySql(_) => {
+            return Err("in-grid editing is a Postgres/Supabase feature".to_string())
+        }
+    };
+    pg_primary_key_columns(pool, schema, table).await
+}
+
+async fn pg_primary_key_columns(
+    pool: &PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<String>, String> {
+    let rows = sqlx::query(
+        "SELECT kcu.column_name::text
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+         WHERE tc.constraint_type = 'PRIMARY KEY'
+           AND tc.table_schema = $1 AND tc.table_name = $2
+         ORDER BY kcu.ordinal_position",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    rows.iter()
+        .map(|r| r.try_get::<String, _>(0).map_err(|e| e.to_string()))
+        .collect()
+}
+
+/// column name -> `pg_type` name (e.g. `int4`, `text`, `uuid`), used to cast
+/// the text values `update_cell` receives from the frontend back to each
+/// column's real type.
+async fn column_types(
+    pool: &PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let rows = sqlx::query(
+        "SELECT column_name::text, udt_name::text
+         FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = $2",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    rows.iter()
+        .map(|r| {
+            Ok((
+                r.try_get::<String, _>(0)
+                    .map_err(|e: sqlx::Error| e.to_string())?,
+                r.try_get::<String, _>(1)
+                    .map_err(|e: sqlx::Error| e.to_string())?,
+            ))
+        })
+        .collect()
+}
+
+/// Update a single cell: `UPDATE <table> SET <column> = $1 WHERE <pk...>`.
+/// Values arrive as text from the UI; `$n::text::<udt>` casts each one back
+/// to its column's real type (an explicit cast, so it works for any type
+/// with a text representation — no special-casing per Postgres type).
+/// Tables without a primary key are rejected rather than risking an
+/// unbounded WHERE clause.
+pub async fn update_cell(
+    db: &Db,
+    schema: &str,
+    table: &str,
+    pk: &std::collections::HashMap<String, Option<String>>,
+    column: &str,
+    value: Option<&str>,
+) -> Result<(), String> {
+    let pool = match db {
+        Db::Postgres(pool) => pool,
+        Db::Sqlite(_) | Db::MySql(_) => {
+            return Err("in-grid editing is a Postgres/Supabase feature".to_string())
+        }
+    };
+    let pk_cols = pg_primary_key_columns(pool, schema, table).await?;
+    if pk_cols.is_empty() {
+        return Err(format!(
+            "{schema}.{table} has no primary key; editing is disabled"
+        ));
+    }
+    let types = column_types(pool, schema, table).await?;
+    let target_type = types
+        .get(column)
+        .ok_or_else(|| format!("unknown column {column}"))?;
+
+    let mut sql = format!(
+        "UPDATE {}.{} SET {} = $1::text::{} WHERE ",
+        quote_ident(schema),
+        quote_ident(table),
+        quote_ident(column),
+        quote_ident(target_type),
+    );
+    let clauses = pk_cols
+        .iter()
+        .enumerate()
+        .map(|(i, pk_col)| {
+            let pk_type = types
+                .get(pk_col)
+                .ok_or_else(|| format!("unknown column {pk_col}"))?;
+            Ok(format!(
+                "{} = ${}::text::{}",
+                quote_ident(pk_col),
+                i + 2,
+                quote_ident(pk_type),
+            ))
+        })
+        .collect::<Result<Vec<String>, String>>()?;
+    sql.push_str(&clauses.join(" AND "));
+
+    let mut q = sqlx::query(&sql).bind(value);
+    for pk_col in &pk_cols {
+        let v = pk.get(pk_col).cloned().flatten();
+        q = q.bind(v);
+    }
+    let result = q.execute(pool).await.map_err(|e| e.to_string())?;
+    if result.rows_affected() != 1 {
+        return Err(format!(
+            "expected to update 1 row, updated {} — row may have changed underneath",
+            result.rows_affected()
+        ));
+    }
+    Ok(())
+}
+
 /// Row-level-security policies from the real `pg_policies` catalog — the
 /// Supabase panel's data source. A proper RLS editor is issue #6.
 #[derive(Debug, Clone, Serialize)]

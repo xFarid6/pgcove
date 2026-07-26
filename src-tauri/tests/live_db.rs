@@ -378,3 +378,84 @@ async fn run_query_surfaces_syntax_errors_cleanly() {
         "expected a specific, readable parse error, got: {err}"
     );
 }
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn updates_a_cell_value_in_grid() {
+    let p = pool().await;
+    db::execute_ddl(&p, "DROP TABLE IF EXISTS pgcove_test_update_cell")
+        .await
+        .unwrap();
+    db::execute_ddl(
+        &p,
+        "CREATE TABLE pgcove_test_update_cell (id serial primary key, note text)",
+    )
+    .await
+    .unwrap();
+    db::execute_ddl(
+        &p,
+        "INSERT INTO pgcove_test_update_cell (note) VALUES ('before')",
+    )
+    .await
+    .unwrap();
+
+    let pk_cols = db::primary_key_columns(&p, "public", "pgcove_test_update_cell")
+        .await
+        .unwrap();
+    assert_eq!(pk_cols, vec!["id".to_string()]);
+
+    let mut pk = std::collections::HashMap::new();
+    pk.insert("id".to_string(), Some("1".to_string()));
+    db::update_cell(
+        &p,
+        "public",
+        "pgcove_test_update_cell",
+        &pk,
+        "note",
+        Some("after"),
+    )
+    .await
+    .unwrap();
+
+    let page = db::table_rows(
+        &p,
+        "public",
+        "pgcove_test_update_cell",
+        &default_rows_query(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(page.rows, serde_json::json!([{"id": 1, "note": "after"}]));
+
+    db::execute_ddl(&p, "DROP TABLE pgcove_test_update_cell")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn update_cell_rejects_tables_without_primary_key() {
+    let p = pool().await;
+    db::execute_ddl(&p, "DROP TABLE IF EXISTS pgcove_test_no_pk")
+        .await
+        .unwrap();
+    db::execute_ddl(&p, "CREATE TABLE pgcove_test_no_pk (note text)")
+        .await
+        .unwrap();
+
+    let err = db::update_cell(
+        &p,
+        "public",
+        "pgcove_test_no_pk",
+        &std::collections::HashMap::new(),
+        "note",
+        Some("x"),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.contains("primary key"), "unexpected error: {err}");
+
+    db::execute_ddl(&p, "DROP TABLE pgcove_test_no_pk")
+        .await
+        .unwrap();
+}

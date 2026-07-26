@@ -274,6 +274,40 @@ describe("DataGrid", () => {
     await w.findAll("button").find((b) => b.text() === "Filter")!.trigger("click");
     expect(w.emitted("filter")).toEqual([["name", "a"]]);
   });
+
+  it("edits a cell on double-click + enter when editable with a primary key", async () => {
+    const w = mount(DataGrid, {
+      props: {
+        rows: [{ id: 1, title: "buy milk" }],
+        editable: true,
+        pkColumns: ["id"],
+      },
+    });
+    await w.findAll("td")[1].trigger("dblclick");
+    const input = w.find("input.cell-input");
+    expect(input.exists()).toBe(true);
+    await input.setValue("buy bread");
+    await input.trigger("keydown", { key: "Enter" });
+    expect(w.emitted("edit")).toEqual([[0, "title", "buy bread"]]);
+  });
+
+  it("cancels an edit on escape without emitting", async () => {
+    const w = mount(DataGrid, {
+      props: { rows: [{ id: 1, title: "buy milk" }], editable: true, pkColumns: ["id"] },
+    });
+    await w.findAll("td")[1].trigger("dblclick");
+    await w.find("input.cell-input").trigger("keydown", { key: "Escape" });
+    expect(w.find("input.cell-input").exists()).toBe(false);
+    expect(w.emitted("edit")).toBeUndefined();
+  });
+
+  it("does not enter edit mode without primary-key columns", async () => {
+    const w = mount(DataGrid, {
+      props: { rows: [{ id: 1, title: "buy milk" }], editable: true, pkColumns: [] },
+    });
+    await w.findAll("td")[1].trigger("dblclick");
+    expect(w.find("input.cell-input").exists()).toBe(false);
+  });
 });
 
 describe("QueryEditor", () => {

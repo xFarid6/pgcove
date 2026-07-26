@@ -4,7 +4,6 @@ import { describe, test } from "vitest";
 
 describe("deferred features", () => {
   test.todo("query editor syntax highlighting (issue #1 follow-up)");
-  test.todo("in-grid cell editing with type-aware inputs (issue #2)");
   test.todo("SQLite native file-picker dialog (issue #4 follow-up — text path input ships now)");
   // Issue #5 shipped: the project/storage sections of SupabasePanel and the
   // Supabase connection form variant are covered in components.spec.ts,

@@ -152,6 +152,31 @@ pub async fn table_structure(
 }
 
 #[tauri::command]
+pub async fn primary_key_columns(
+    app: tauri::AppHandle,
+    connection_id: String,
+    schema: String,
+    table: String,
+) -> Result<Vec<String>, String> {
+    let pool = pool_for(&app, &connection_id).await?;
+    db::primary_key_columns(&pool, &schema, &table).await
+}
+
+#[tauri::command]
+pub async fn update_cell(
+    app: tauri::AppHandle,
+    connection_id: String,
+    schema: String,
+    table: String,
+    pk: std::collections::HashMap<String, Option<String>>,
+    column: String,
+    value: Option<String>,
+) -> Result<(), String> {
+    let pool = pool_for(&app, &connection_id).await?;
+    db::update_cell(&pool, &schema, &table, &pk, &column, value.as_deref()).await
+}
+
+#[tauri::command]
 pub async fn list_policies(
     app: tauri::AppHandle,
     connection_id: String,
