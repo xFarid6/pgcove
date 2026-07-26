@@ -3,8 +3,8 @@
 A native database client for Postgres with **first-class Supabase awareness**
 — RLS policies and auth users surfaced natively, not "it's just Postgres".
 For backend/full-stack developers, especially Supabase users who find the web
-dashboard slow for routine table work. MySQL and SQLite are planned (issues
-#3/#4).
+dashboard slow for routine table work. SQLite is also supported (issue #4);
+MySQL is planned (issue #3).
 
 Built with **Tauri v2 + Vue 3 + TypeScript + Rust**
 ([sqlx](https://crates.io/crates/sqlx) with rustls). Same architecture as
@@ -56,6 +56,15 @@ Add a connection: any reachable Postgres works. For Supabase use the
 `aws-0-<region>.pooler.supabase.com`, port 5432/6543, user
 `postgres.<project-ref>`); TLS is negotiated automatically
 (`sslmode=prefer`). The password goes to the OS keyring, never to disk.
+
+For SQLite, pick "SQLite" in the connection form and give it a file path
+(created on first connect if missing) or `:memory:` for a scratch database.
+No password, no keyring entry. The query editor accepts full SQL there —
+`CREATE`/`INSERT`/`UPDATE`/`DELETE` all run, not just `SELECT` (SQLite rows
+are converted to JSON in Rust instead of the Postgres `row_to_json` subquery
+trick, so it isn't limited to SELECT-shaped statements). RLS policies and
+`auth.users` are Postgres/Supabase-only and error clearly on a SQLite
+connection — the Supabase panel just shows it as empty.
 
 ### Tests
 

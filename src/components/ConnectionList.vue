@@ -24,7 +24,14 @@ defineEmits<{
         @click="$emit('select', c.id)"
       >
         {{ c.name }}
-        <span class="detail">{{ c.user }}@{{ c.host }}:{{ c.port }}/{{ c.database }}</span>
+        <span
+          v-if="c.kind === 'sqlite'"
+          class="detail"
+        >{{ c.database }}</span>
+        <span
+          v-else
+          class="detail"
+        >{{ c.user }}@{{ c.host }}:{{ c.port }}/{{ c.database }}</span>
       </button>
       <button
         class="remove"

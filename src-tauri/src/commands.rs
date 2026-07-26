@@ -3,17 +3,22 @@
 use std::path::PathBuf;
 use tauri::Manager;
 
-use crate::connections::{self, ConnectionInfo};
-use crate::db::{self, AuthUser, PolicyInfo, TableInfo};
+use crate::connections::{self, ConnectionInfo, DbKind};
+use crate::db::{self, AuthUser, Db, PolicyInfo, TableInfo};
 
 fn store_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
 }
 
-async fn pool_for(app: &tauri::AppHandle, id: &str) -> Result<sqlx::PgPool, String> {
+async fn pool_for(app: &tauri::AppHandle, id: &str) -> Result<Db, String> {
     let info = connections::get(&store_dir(app)?, id)?;
-    let password = connections::get_password(id)?;
-    db::connect(&db::connection_url(&info, &password)).await
+    // SQLite connections have no password — nothing is ever written to the
+    // keyring for them, so looking one up would just error.
+    let password = match info.kind {
+        DbKind::Sqlite => String::new(),
+        DbKind::Postgres => connections::get_password(id)?,
+    };
+    db::connect(info.kind, &db::connection_url(&info, &password)).await
 }
 
 #[tauri::command]

@@ -11,14 +11,31 @@ use std::path::{Path, PathBuf};
 
 const KEYRING_SERVICE: &str = "pgcove";
 
+/// Which wire protocol/driver a connection uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DbKind {
+    #[default]
+    Postgres,
+    Sqlite,
+}
+
 /// One saved connection = one database. For Supabase this is the project's
 /// Postgres pooler (host like `aws-0-<region>.pooler.supabase.com`, user like
 /// `postgres.<project-ref>`); first-class Management API support is issue #5.
+///
+/// For `DbKind::Sqlite`, only `database` is meaningful — it holds the file
+/// path (or `:memory:`); `host`/`port`/`user` are ignored and the password
+/// is never written to the keyring.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
     pub id: String,
     pub name: String,
+    /// Defaults to Postgres so existing `connections.json` entries (written
+    /// before SQLite support existed) still deserialize.
+    #[serde(default)]
+    pub kind: DbKind,
     pub host: String,
     pub port: u16,
     pub user: String,
@@ -93,6 +110,7 @@ mod tests {
         ConnectionInfo {
             id: id.into(),
             name: format!("db {id}"),
+            kind: DbKind::Postgres,
             host: "localhost".into(),
             port: 5432,
             user: "postgres".into(),

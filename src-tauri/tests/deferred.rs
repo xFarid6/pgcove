@@ -10,10 +10,6 @@ fn updates_a_cell_value_in_grid() {}
 fn connects_to_mysql() {}
 
 #[test]
-#[ignore = "not implemented — SQLite support, see pgcove issue #4"]
-fn opens_a_sqlite_file() {}
-
-#[test]
 #[ignore = "not implemented — Supabase Management API, see pgcove issue #5"]
 fn fetches_project_info_from_management_api() {}
 
