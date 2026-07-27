@@ -48,6 +48,39 @@ pub struct ConnectionInfo {
     /// matching service-role key lives in the keyring, never in this file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supabase_url: Option<String>,
+    /// SSH tunnel (issue #11): when set, `db.rs` opens a local port forward
+    /// through this bastion before pooling and connects to it instead of
+    /// `host`/`port` directly. `host`/`port` above stay the DB's address as
+    /// reachable *from the bastion* (often `127.0.0.1:5432` for a DB bound
+    /// to localhost on a remote box).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_tunnel: Option<SshTunnelConfig>,
+}
+
+/// Non-secret half of an SSH tunnel. The key passphrase or SSH password (for
+/// `SshAuth::Password`) lives in the keyring, alongside the DB password —
+/// never in `connections.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshTunnelConfig {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub auth: SshAuth,
+}
+
+/// Which SSH auth method to use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "method")]
+pub enum SshAuth {
+    /// Whichever identity the platform's running ssh-agent (or, on Windows,
+    /// Pageant) offers first that the server accepts — no secret needed.
+    Agent,
+    /// `key_path` is a private key file; its passphrase (if any, may be
+    /// empty) lives in the keyring.
+    Key { key_path: String },
+    /// The keyring holds the SSH password.
+    Password,
 }
 
 fn store_file(dir: &Path) -> PathBuf {
@@ -91,6 +124,16 @@ fn service_key_entry(id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYRING_SERVICE, &service_key_account(id)).map_err(|e| e.to_string())
 }
 
+/// Keyring account for a connection's SSH secret (key passphrase or SSH
+/// password) — same one-account-per-secret pattern as `service_key_account`.
+fn ssh_secret_account(id: &str) -> String {
+    format!("{id}#ssh-secret")
+}
+
+fn ssh_secret_entry(id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYRING_SERVICE, &ssh_secret_account(id)).map_err(|e| e.to_string())
+}
+
 pub fn get_password(id: &str) -> Result<String, String> {
     secret_entry(id)?.get_password().map_err(|e| e.to_string())
 }
@@ -101,13 +144,20 @@ pub fn get_service_key(id: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Upsert a connection; `password` and `service_key` are written to the
-/// keyring when provided (add, or edit that changes them).
+pub fn get_ssh_secret(id: &str) -> Result<String, String> {
+    ssh_secret_entry(id)?
+        .get_password()
+        .map_err(|e| e.to_string())
+}
+
+/// Upsert a connection; `password`, `service_key` and `ssh_secret` are
+/// written to the keyring when provided (add, or edit that changes them).
 pub fn save(
     dir: &Path,
     info: ConnectionInfo,
     password: Option<String>,
     service_key: Option<String>,
+    ssh_secret: Option<String>,
 ) -> Result<(), String> {
     if let Some(p) = password {
         secret_entry(&info.id)?
@@ -117,6 +167,11 @@ pub fn save(
     if let Some(k) = service_key {
         service_key_entry(&info.id)?
             .set_password(&k)
+            .map_err(|e| e.to_string())?;
+    }
+    if let Some(s) = ssh_secret {
+        ssh_secret_entry(&info.id)?
+            .set_password(&s)
             .map_err(|e| e.to_string())?;
     }
     let mut conns = load(dir)?;
@@ -133,6 +188,9 @@ pub fn delete(dir: &Path, id: &str) -> Result<(), String> {
         let _ = entry.delete_credential();
     }
     if let Ok(entry) = service_key_entry(id) {
+        let _ = entry.delete_credential();
+    }
+    if let Ok(entry) = ssh_secret_entry(id) {
         let _ = entry.delete_credential();
     }
     let mut conns = load(dir)?;
@@ -154,6 +212,7 @@ mod tests {
             user: "postgres".into(),
             database: "postgres".into(),
             supabase_url: None,
+            ssh_tunnel: None,
         }
     }
 
@@ -162,14 +221,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(load(dir.path()).unwrap(), vec![]);
 
-        save(dir.path(), conn("a"), None, None).unwrap();
-        save(dir.path(), conn("b"), None, None).unwrap();
+        save(dir.path(), conn("a"), None, None, None).unwrap();
+        save(dir.path(), conn("b"), None, None, None).unwrap();
         assert_eq!(load(dir.path()).unwrap().len(), 2);
 
         // Upsert replaces, not duplicates.
         let mut edited = conn("a");
         edited.name = "renamed".into();
-        save(dir.path(), edited, None, None).unwrap();
+        save(dir.path(), edited, None, None, None).unwrap();
         assert_eq!(load(dir.path()).unwrap().len(), 2);
         assert_eq!(get(dir.path(), "a").unwrap().name, "renamed");
 
@@ -182,8 +241,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut sb = conn("sb");
         sb.supabase_url = Some("https://abcdefgh.supabase.co".into());
-        save(dir.path(), sb, None, None).unwrap();
-        save(dir.path(), conn("plain"), None, None).unwrap();
+        save(dir.path(), sb, None, None, None).unwrap();
+        save(dir.path(), conn("plain"), None, None, None).unwrap();
 
         assert_eq!(
             get(dir.path(), "sb").unwrap().supabase_url.as_deref(),
@@ -209,12 +268,67 @@ mod tests {
         let old = get(dir.path(), "old").unwrap();
         assert_eq!(old.kind, DbKind::Postgres);
         assert_eq!(old.supabase_url, None);
+        assert_eq!(old.ssh_tunnel, None);
+    }
+
+    #[test]
+    fn ssh_tunnel_roundtrips_and_stays_optional() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tunneled = conn("t");
+        tunneled.host = "127.0.0.1".into();
+        tunneled.ssh_tunnel = Some(SshTunnelConfig {
+            host: "bastion.example.com".into(),
+            port: 22,
+            user: "deploy".into(),
+            auth: SshAuth::Key {
+                key_path: "/home/me/.ssh/id_ed25519".into(),
+            },
+        });
+        save(dir.path(), tunneled, None, None, None).unwrap();
+        save(dir.path(), conn("plain"), None, None, None).unwrap();
+
+        let loaded = get(dir.path(), "t").unwrap().ssh_tunnel.unwrap();
+        assert_eq!(loaded.host, "bastion.example.com");
+        assert_eq!(
+            loaded.auth,
+            SshAuth::Key {
+                key_path: "/home/me/.ssh/id_ed25519".into()
+            }
+        );
+        assert_eq!(get(dir.path(), "plain").unwrap().ssh_tunnel, None);
+        // Non-tunneled connections keep the field out of connections.json.
+        let raw = fs::read_to_string(store_file(dir.path())).unwrap();
+        assert_eq!(raw.matches("sshTunnel").count(), 1);
+    }
+
+    #[test]
+    fn ssh_auth_agent_roundtrips_with_no_extra_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tunneled = conn("t");
+        tunneled.ssh_tunnel = Some(SshTunnelConfig {
+            host: "bastion.example.com".into(),
+            port: 22,
+            user: "deploy".into(),
+            auth: SshAuth::Agent,
+        });
+        save(dir.path(), tunneled, None, None, None).unwrap();
+        assert_eq!(
+            get(dir.path(), "t").unwrap().ssh_tunnel.unwrap().auth,
+            SshAuth::Agent
+        );
     }
 
     #[test]
     fn service_key_uses_a_distinct_keyring_account() {
         assert_ne!(service_key_account("abc"), "abc");
         assert!(service_key_account("abc").starts_with("abc"));
+    }
+
+    #[test]
+    fn ssh_secret_uses_a_distinct_keyring_account() {
+        assert_ne!(ssh_secret_account("abc"), "abc");
+        assert!(ssh_secret_account("abc").starts_with("abc"));
+        assert_ne!(ssh_secret_account("abc"), service_key_account("abc"));
     }
 
     // Real OS keyring roundtrip. Ignored in CI (headless ubuntu has no Secret
@@ -224,7 +338,7 @@ mod tests {
     fn keyring_password_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let id = "pgcove-test-keyring";
-        save(dir.path(), conn(id), Some("s3cret".into()), None).unwrap();
+        save(dir.path(), conn(id), Some("s3cret".into()), None, None).unwrap();
         assert_eq!(get_password(id).unwrap(), "s3cret");
         delete(dir.path(), id).unwrap();
         assert!(get_password(id).is_err());
@@ -241,11 +355,32 @@ mod tests {
             conn(id),
             Some("s3cret".into()),
             Some("service-role-key".into()),
+            None,
         )
         .unwrap();
         assert_eq!(get_password(id).unwrap(), "s3cret");
         assert_eq!(get_service_key(id).unwrap(), "service-role-key");
         delete(dir.path(), id).unwrap();
         assert!(get_service_key(id).is_err());
+    }
+
+    // DB password and SSH secret must coexist for one connection id.
+    #[test]
+    #[ignore = "requires a real OS keyring; run locally with --ignored"]
+    fn keyring_ssh_secret_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "pgcove-test-keyring-ssh";
+        save(
+            dir.path(),
+            conn(id),
+            Some("s3cret".into()),
+            None,
+            Some("ssh-passphrase".into()),
+        )
+        .unwrap();
+        assert_eq!(get_password(id).unwrap(), "s3cret");
+        assert_eq!(get_ssh_secret(id).unwrap(), "ssh-passphrase");
+        delete(dir.path(), id).unwrap();
+        assert!(get_ssh_secret(id).is_err());
     }
 }

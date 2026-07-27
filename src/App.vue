@@ -301,8 +301,9 @@ async function onSave(
   info: ConnectionInfo,
   password: string | undefined,
   serviceKey: string | undefined,
+  sshSecret: string | undefined,
 ) {
-  await saveConnection(info, password, serviceKey);
+  await saveConnection(info, password, serviceKey, sshSecret);
   await refreshConnections();
 }
 

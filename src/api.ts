@@ -4,6 +4,20 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type DbKind = "postgres" | "sqlite";
 
+/**
+ * SSH tunnel (issue #11): `host`/`port` on `ConnectionInfo` stay the DB's
+ * address as reachable *from this bastion* (often `127.0.0.1:5432` for a DB
+ * bound to localhost on a remote box) — pgcove opens a local port forward
+ * through it and connects to that instead. The key passphrase or SSH
+ * password is passed to saveConnection separately and kept in the keyring.
+ */
+export interface SshTunnelConfig {
+  host: string;
+  port: number;
+  user: string;
+  auth: { method: "agent" } | { method: "key"; keyPath: string } | { method: "password" };
+}
+
 export interface ConnectionInfo {
   id: string;
   name: string;
@@ -20,6 +34,8 @@ export interface ConnectionInfo {
    * service-role key is passed to saveConnection and kept in the OS keyring.
    */
   supabaseUrl?: string;
+  /** Present when this connection reaches its DB through an SSH tunnel. */
+  sshTunnel?: SshTunnelConfig;
 }
 
 export interface TableInfo {
@@ -133,11 +149,13 @@ export const saveConnection = (
   info: ConnectionInfo,
   password?: string,
   serviceKey?: string,
+  sshSecret?: string,
 ) =>
   invoke<void>("save_connection", {
     info,
     password: password ?? null,
     serviceKey: serviceKey ?? null,
+    sshSecret: sshSecret ?? null,
   });
 
 export const deleteConnection = (id: string) =>
