@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // Supabase-first panel: project info and storage buckets over the project's
-// HTTP API (issue #5), plus RLS policies (from the real pg_policies catalog)
-// and auth.users over SQL. RLS editing is issue #6, user admin issue #7.
-import type { AuthUser, PolicyInfo, StorageBucket, SupabaseProjectInfo } from "../api";
+// HTTP API (issue #5), plus RLS policies (from the real pg_policies catalog,
+// editable per issue #6) and auth.users over SQL (user admin is issue #7).
+import { ref } from "vue";
+import type { AuthUser, PolicyDraft, PolicyInfo, StorageBucket, SupabaseProjectInfo } from "../api";
 
 withDefaults(
   defineProps<{
@@ -15,9 +16,56 @@ withDefaults(
     buckets?: StorageBucket[];
     /** Why the project URL + service-role key calls didn't return data. */
     projectError?: string;
+    /** Error from the most recent policy/RLS DDL attempt, if any. */
+    ddlError?: string;
   }>(),
-  { projectInfo: null, buckets: () => [], projectError: "" },
+  { projectInfo: null, buckets: () => [], projectError: "", ddlError: "" },
 );
+
+const emit = defineEmits<{
+  "create-policy": [draft: PolicyDraft];
+  "alter-policy": [draft: PolicyDraft];
+  "drop-policy": [policy: PolicyInfo];
+  "toggle-rls": [schema: string, table: string, enable: boolean];
+}>();
+
+const schema = ref("public");
+const table = ref("");
+const name = ref("");
+const command = ref("ALL");
+const roles = ref("");
+const usingExpr = ref("");
+const checkExpr = ref("");
+
+function draft(): PolicyDraft {
+  return {
+    schema: schema.value.trim() || "public",
+    table: table.value.trim(),
+    name: name.value.trim(),
+    command: command.value,
+    roles: roles.value
+      .split(",")
+      .map((r) => r.trim())
+      .filter(Boolean),
+    usingExpr: usingExpr.value.trim() || undefined,
+    checkExpr: checkExpr.value.trim() || undefined,
+  };
+}
+
+function submitCreate() {
+  if (!table.value.trim() || !name.value.trim()) return;
+  emit("create-policy", draft());
+}
+
+function submitAlter() {
+  if (!table.value.trim() || !name.value.trim()) return;
+  emit("alter-policy", draft());
+}
+
+function toggleRls(enable: boolean) {
+  if (!table.value.trim()) return;
+  emit("toggle-rls", schema.value.trim() || "public", table.value.trim(), enable);
+}
 </script>
 
 <template>
@@ -93,6 +141,80 @@ withDefaults(
     </section>
     <section>
       <h2>RLS policies</h2>
+      <form
+        class="policy-form"
+        @submit.prevent="submitCreate"
+      >
+        <div class="row">
+          <input
+            v-model="schema"
+            placeholder="schema"
+            size="10"
+          >
+          <input
+            v-model="table"
+            placeholder="table"
+            required
+          >
+          <button
+            type="button"
+            @click="toggleRls(true)"
+          >
+            Enable RLS
+          </button>
+          <button
+            type="button"
+            @click="toggleRls(false)"
+          >
+            Disable RLS
+          </button>
+        </div>
+        <div class="row">
+          <input
+            v-model="name"
+            placeholder="policy name"
+            required
+          >
+          <select v-model="command">
+            <option>ALL</option>
+            <option>SELECT</option>
+            <option>INSERT</option>
+            <option>UPDATE</option>
+            <option>DELETE</option>
+          </select>
+          <input
+            v-model="roles"
+            placeholder="roles (comma-separated, blank = default)"
+          >
+        </div>
+        <textarea
+          v-model="usingExpr"
+          class="expr-input"
+          placeholder="USING expression"
+        />
+        <textarea
+          v-model="checkExpr"
+          class="expr-input"
+          placeholder="WITH CHECK expression"
+        />
+        <div class="row">
+          <button type="submit">
+            Create policy
+          </button>
+          <button
+            type="button"
+            @click="submitAlter"
+          >
+            Alter policy (roles/using/check only)
+          </button>
+        </div>
+      </form>
+      <p
+        v-if="ddlError"
+        class="error"
+      >
+        {{ ddlError }}
+      </p>
       <table v-if="policies.length > 0">
         <thead>
           <tr>
@@ -101,6 +223,7 @@ withDefaults(
             <th>Command</th>
             <th>Roles</th>
             <th>Expression</th>
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -114,6 +237,14 @@ withDefaults(
             <td>{{ p.roles }}</td>
             <td class="expr">
               {{ p.expression }}
+            </td>
+            <td>
+              <button
+                type="button"
+                @click="emit('drop-policy', p)"
+              >
+                Drop
+              </button>
             </td>
           </tr>
         </tbody>
@@ -189,5 +320,25 @@ td {
 }
 .empty {
   opacity: 0.6;
+}
+.error {
+  color: #e06c75;
+}
+.policy-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  max-width: 32rem;
+}
+.policy-form .row {
+  display: flex;
+  gap: 0.4rem;
+}
+.expr-input {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  min-height: 2.2rem;
+  resize: vertical;
 }
 </style>

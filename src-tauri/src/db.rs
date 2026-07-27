@@ -2,7 +2,7 @@
 //! JSON server-side so no client-side type mapping is needed — the query
 //! editor (issue #1) and in-grid editing (issue #2) will need real typing.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Column, Executor, PgPool, Row, SqlitePool, Statement};
@@ -340,6 +340,114 @@ pub async fn list_policies(db: &Db) -> Result<Vec<PolicyInfo>, String> {
         .collect()
 }
 
+/// Form input for creating or altering an RLS policy. `using_expr` and
+/// `check_expr` are user-authored SQL fragments and are passed through
+/// verbatim — only identifiers (schema/table/policy/role names) go through
+/// `quote_ident`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolicyDraft {
+    pub schema: String,
+    pub table: String,
+    pub name: String,
+    /// SELECT | INSERT | UPDATE | DELETE | ALL
+    pub command: String,
+    pub roles: Vec<String>,
+    pub using_expr: Option<String>,
+    pub check_expr: Option<String>,
+}
+
+fn roles_clause(roles: &[String]) -> String {
+    if roles.is_empty() {
+        return String::new();
+    }
+    format!(
+        " TO {}",
+        roles
+            .iter()
+            .map(|r| quote_ident(r))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn expr_clauses(using_expr: &Option<String>, check_expr: &Option<String>) -> String {
+    let mut s = String::new();
+    if let Some(u) = using_expr.as_deref().filter(|e| !e.trim().is_empty()) {
+        s.push_str(&format!(" USING ({u})"));
+    }
+    if let Some(c) = check_expr.as_deref().filter(|e| !e.trim().is_empty()) {
+        s.push_str(&format!(" WITH CHECK ({c})"));
+    }
+    s
+}
+
+/// `CREATE POLICY ...` for a new policy. Review before executing via
+/// [`execute_ddl`].
+pub fn create_policy_sql(p: &PolicyDraft) -> String {
+    format!(
+        "CREATE POLICY {} ON {}.{} FOR {}{}{};",
+        quote_ident(&p.name),
+        quote_ident(&p.schema),
+        quote_ident(&p.table),
+        p.command,
+        roles_clause(&p.roles),
+        expr_clauses(&p.using_expr, &p.check_expr),
+    )
+}
+
+/// `ALTER POLICY ...` — roles/USING/CHECK only; Postgres doesn't allow
+/// changing a policy's command (SELECT/INSERT/...) in place, so switching
+/// command means drop + create instead.
+pub fn alter_policy_sql(p: &PolicyDraft) -> String {
+    format!(
+        "ALTER POLICY {} ON {}.{}{}{};",
+        quote_ident(&p.name),
+        quote_ident(&p.schema),
+        quote_ident(&p.table),
+        roles_clause(&p.roles),
+        expr_clauses(&p.using_expr, &p.check_expr),
+    )
+}
+
+pub fn drop_policy_sql(schema: &str, table: &str, name: &str) -> String {
+    format!(
+        "DROP POLICY {} ON {}.{};",
+        quote_ident(name),
+        quote_ident(schema),
+        quote_ident(table),
+    )
+}
+
+/// `ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY` — a policy without
+/// RLS enabled on its table is a no-op, so this is exposed alongside policy
+/// editing rather than buried in a separate table-structure view.
+pub fn rls_sql(schema: &str, table: &str, enable: bool) -> String {
+    format!(
+        "ALTER TABLE {}.{} {} ROW LEVEL SECURITY;",
+        quote_ident(schema),
+        quote_ident(table),
+        if enable { "ENABLE" } else { "DISABLE" },
+    )
+}
+
+/// Execute a DDL/DML statement with no result rows expected — the confirmed
+/// counterpart to the SQL the `*_sql` builders above generate for review.
+pub async fn execute_ddl(db: &Db, sql: &str) -> Result<(), String> {
+    match db {
+        Db::Postgres(pool) => sqlx::query(sql)
+            .execute(pool)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        Db::Sqlite(pool) => sqlx::query(sql)
+            .execute(pool)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+    }
+}
+
 /// Supabase `auth.users`. Errors on a plain Postgres without that schema —
 /// the frontend shows that as "not a Supabase database". Management-API
 /// backed user admin is issue #7.
@@ -421,6 +529,73 @@ mod tests {
     fn quote_ident_escapes_quotes() {
         assert_eq!(quote_ident("users"), "\"users\"");
         assert_eq!(quote_ident("we\"ird"), "\"we\"\"ird\"");
+    }
+
+    fn draft() -> PolicyDraft {
+        PolicyDraft {
+            schema: "public".into(),
+            table: "todos".into(),
+            name: "own rows".into(),
+            command: "SELECT".into(),
+            roles: vec!["authenticated".into()],
+            using_expr: Some("auth.uid() = user_id".into()),
+            check_expr: None,
+        }
+    }
+
+    #[test]
+    fn create_policy_sql_builds_full_statement() {
+        assert_eq!(
+            create_policy_sql(&draft()),
+            "CREATE POLICY \"own rows\" ON \"public\".\"todos\" FOR SELECT TO \"authenticated\" USING (auth.uid() = user_id);"
+        );
+    }
+
+    #[test]
+    fn create_policy_sql_omits_empty_roles_and_check() {
+        let mut d = draft();
+        d.roles.clear();
+        assert_eq!(
+            create_policy_sql(&d),
+            "CREATE POLICY \"own rows\" ON \"public\".\"todos\" FOR SELECT USING (auth.uid() = user_id);"
+        );
+    }
+
+    #[test]
+    fn create_policy_sql_includes_with_check() {
+        let mut d = draft();
+        d.check_expr = Some("auth.uid() = user_id".into());
+        assert!(create_policy_sql(&d).ends_with("WITH CHECK (auth.uid() = user_id);"));
+    }
+
+    #[test]
+    fn alter_policy_sql_has_no_for_clause() {
+        let sql = alter_policy_sql(&draft());
+        assert_eq!(
+            sql,
+            "ALTER POLICY \"own rows\" ON \"public\".\"todos\" TO \"authenticated\" USING (auth.uid() = user_id);"
+        );
+        assert!(!sql.contains("FOR "));
+    }
+
+    #[test]
+    fn drop_policy_sql_quotes_identifiers() {
+        assert_eq!(
+            drop_policy_sql("public", "todos", "own rows"),
+            "DROP POLICY \"own rows\" ON \"public\".\"todos\";"
+        );
+    }
+
+    #[test]
+    fn rls_sql_toggles_enable_and_disable() {
+        assert_eq!(
+            rls_sql("public", "todos", true),
+            "ALTER TABLE \"public\".\"todos\" ENABLE ROW LEVEL SECURITY;"
+        );
+        assert_eq!(
+            rls_sql("public", "todos", false),
+            "ALTER TABLE \"public\".\"todos\" DISABLE ROW LEVEL SECURITY;"
+        );
     }
 
     #[tokio::test]

@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import {
+  alterPolicySql,
+  createPolicySql,
   deleteConnection,
+  dropPolicySql,
+  executeDdl,
   listAuthUsers,
   listConnections,
   listPolicies,
   listTables,
+  rlsSql,
   runQuery,
   saveConnection,
   supabaseListBuckets,
@@ -14,6 +19,7 @@ import {
   testConnection,
   type AuthUser,
   type ConnectionInfo,
+  type PolicyDraft,
   type PolicyInfo,
   type Row,
   type StorageBucket,
@@ -44,6 +50,7 @@ const error = ref("");
 const queryRows = ref<Row[]>([]);
 const queryError = ref("");
 const queryRunning = ref(false);
+const ddlError = ref("");
 
 async function refreshConnections() {
   connections.value = await listConnections();
@@ -123,6 +130,26 @@ async function onRunQuery(sql: string) {
     queryRunning.value = false;
   }
 }
+
+/** Preview a DDL statement, let the user confirm it, then run + refresh policies. */
+async function runConfirmedDdl(sqlPromise: Promise<string>, refreshPolicies = true) {
+  if (!activeId.value) return;
+  ddlError.value = "";
+  const sql = await sqlPromise;
+  if (!window.confirm(sql)) return;
+  try {
+    await executeDdl(activeId.value, sql);
+    if (refreshPolicies) policies.value = await listPolicies(activeId.value);
+  } catch (e) {
+    ddlError.value = String(e);
+  }
+}
+
+const onCreatePolicy = (draft: PolicyDraft) => runConfirmedDdl(createPolicySql(draft));
+const onAlterPolicy = (draft: PolicyDraft) => runConfirmedDdl(alterPolicySql(draft));
+const onDropPolicy = (p: PolicyInfo) => runConfirmedDdl(dropPolicySql(p.schema, p.table, p.name));
+const onToggleRls = (schema: string, table: string, enable: boolean) =>
+  runConfirmedDdl(rlsSql(schema, table, enable), false);
 
 async function onSave(
   info: ConnectionInfo,
@@ -237,6 +264,11 @@ onMounted(refreshConnections);
           :project-info="projectInfo"
           :buckets="buckets"
           :project-error="projectError"
+          :ddl-error="ddlError"
+          @create-policy="onCreatePolicy"
+          @alter-policy="onAlterPolicy"
+          @drop-policy="onDropPolicy"
+          @toggle-rls="onToggleRls"
         />
       </template>
       <p

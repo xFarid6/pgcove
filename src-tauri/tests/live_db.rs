@@ -44,6 +44,54 @@ async fn lists_rls_policies() {
 
 #[tokio::test]
 #[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn creates_and_drops_an_rls_policy() {
+    let p = pool().await;
+    let table = "pgcove_test_rls_roundtrip";
+
+    db::execute_ddl(&p, &format!("DROP TABLE IF EXISTS {table}"))
+        .await
+        .unwrap();
+    db::execute_ddl(&p, &format!("CREATE TABLE {table} (id int, user_id uuid)"))
+        .await
+        .unwrap();
+
+    let enable_sql = db::rls_sql("public", table, true);
+    assert!(enable_sql.contains("ENABLE ROW LEVEL SECURITY"));
+    db::execute_ddl(&p, &enable_sql).await.unwrap();
+
+    let draft = db::PolicyDraft {
+        schema: "public".into(),
+        table: table.into(),
+        name: "own rows".into(),
+        command: "SELECT".into(),
+        roles: vec![],
+        // A plain expression, not auth.uid() — this runs against local
+        // Postgres too, which has no `auth` schema.
+        using_expr: Some("user_id IS NOT NULL".into()),
+        check_expr: None,
+    };
+    db::execute_ddl(&p, &db::create_policy_sql(&draft))
+        .await
+        .unwrap();
+
+    let policies = db::list_policies(&p).await.unwrap();
+    assert!(policies
+        .iter()
+        .any(|pol| pol.table == table && pol.name == "own rows"));
+
+    db::execute_ddl(&p, &db::drop_policy_sql("public", table, "own rows"))
+        .await
+        .unwrap();
+    let policies = db::list_policies(&p).await.unwrap();
+    assert!(!policies.iter().any(|pol| pol.table == table));
+
+    db::execute_ddl(&p, &format!("DROP TABLE {table}"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
 async fn runs_arbitrary_select_query() {
     let p = pool().await;
     let rows = db::run_query(&p, "select 1 as n, 'hi' as s").await.unwrap();
