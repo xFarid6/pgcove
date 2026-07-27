@@ -70,13 +70,22 @@ describe("api wrappers", () => {
     expect(invoke).toHaveBeenCalledWith("list_tables", { connectionId: "c1" });
   });
 
-  it("table_rows passes schema and table", async () => {
-    invoke.mockResolvedValue([]);
-    await tableRows("c1", "public", "todos");
+  it("table_rows passes schema, table and the paging/sort/filter query", async () => {
+    invoke.mockResolvedValue({ rows: [], approxTotal: 0 });
+    const query = {
+      page: 1,
+      pageSize: 50,
+      orderBy: "id",
+      orderDesc: true,
+      filterColumn: "name",
+      filterValue: "a",
+    };
+    await tableRows("c1", "public", "todos", query);
     expect(invoke).toHaveBeenCalledWith("table_rows", {
       connectionId: "c1",
       schema: "public",
       table: "todos",
+      query,
     });
   });
 

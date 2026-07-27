@@ -192,30 +192,115 @@ pub fn quote_ident(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\"\""))
 }
 
-/// First 100 rows of a table as a JSON array of objects. Pagination/sorting
-/// is issue #9.
-pub async fn table_rows(db: &Db, schema: &str, table: &str) -> Result<serde_json::Value, String> {
+/// Page/sort/filter request for `table_rows` (issue #9). Column names go
+/// through `quote_ident`; `filter_value` is always bound as a parameter,
+/// never interpolated.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowsQuery {
+    pub page: u32,
+    pub page_size: u32,
+    pub order_by: Option<String>,
+    pub order_desc: bool,
+    pub filter_column: Option<String>,
+    pub filter_value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowsPage {
+    pub rows: serde_json::Value,
+    /// `pg_class.reltuples` on Postgres — a fast estimate, not an exact
+    /// count, and 0 for a freshly created table that hasn't been analyzed
+    /// yet. SQLite uses a real `COUNT(*)`, fine at dev-db scale.
+    pub approx_total: i64,
+}
+
+/// One page of a table's rows as a JSON array of objects, plus an
+/// approximate total row count for the pager.
+pub async fn table_rows(
+    db: &Db,
+    schema: &str,
+    table: &str,
+    query: &RowsQuery,
+) -> Result<RowsPage, String> {
+    let page = query.page.max(1);
+    let page_size = query.page_size.max(1);
+    let offset = (page - 1) * page_size;
+    let order_clause = query
+        .order_by
+        .as_deref()
+        .filter(|c| !c.trim().is_empty())
+        .map(|c| {
+            format!(
+                " ORDER BY {} {}",
+                quote_ident(c),
+                if query.order_desc { "DESC" } else { "ASC" }
+            )
+        })
+        .unwrap_or_default();
+    let filter_col = query
+        .filter_column
+        .as_deref()
+        .filter(|c| !c.trim().is_empty());
+
     match db {
         // The server does the serialization (`row_to_json`), so arbitrary
         // column types just work.
         Db::Postgres(pool) => {
+            let where_clause = filter_col
+                .map(|c| format!(" WHERE {}::text ILIKE '%' || $1 || '%'", quote_ident(c)))
+                .unwrap_or_default();
             let sql = format!(
                 "SELECT coalesce(json_agg(row_to_json(x)), '[]'::json)
-                 FROM (SELECT * FROM {}.{} LIMIT 100) x",
+                 FROM (SELECT * FROM {}.{}{where_clause}{order_clause} LIMIT {page_size} OFFSET {offset}) x",
                 quote_ident(schema),
                 quote_ident(table),
             );
-            let row = sqlx::query(&sql)
-                .fetch_one(pool)
-                .await
+            let mut q = sqlx::query(&sql);
+            if !where_clause.is_empty() {
+                q = q.bind(query.filter_value.clone().unwrap_or_default());
+            }
+            let row = q.fetch_one(pool).await.map_err(|e| e.to_string())?;
+            let rows = row
+                .try_get::<serde_json::Value, _>(0)
                 .map_err(|e| e.to_string())?;
-            row.try_get::<serde_json::Value, _>(0)
-                .map_err(|e| e.to_string())
+
+            let qualified = format!("{}.{}", quote_ident(schema), quote_ident(table));
+            let approx_total = sqlx::query_scalar::<_, i64>(
+                "SELECT coalesce(reltuples, 0)::bigint FROM pg_class WHERE oid = ($1)::regclass",
+            )
+            .bind(&qualified)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+            Ok(RowsPage { rows, approx_total })
         }
         // SQLite has one implicit schema — `schema` is ignored.
         Db::Sqlite(pool) => {
-            let sql = format!("SELECT * FROM {} LIMIT 100", quote_ident(table));
-            sqlite_rows_to_json(pool, &sql).await
+            let where_clause = filter_col
+                .map(|c| format!(" WHERE {} LIKE '%' || ? || '%'", quote_ident(c)))
+                .unwrap_or_default();
+            let sql = format!(
+                "SELECT * FROM {}{where_clause}{order_clause} LIMIT {page_size} OFFSET {offset}",
+                quote_ident(table),
+            );
+            let mut q = sqlx::query(&sql);
+            if !where_clause.is_empty() {
+                q = q.bind(query.filter_value.clone().unwrap_or_default());
+            }
+            let rows_raw = q.fetch_all(pool).await.map_err(|e| e.to_string())?;
+            let rows = serde_json::Value::Array(rows_raw.iter().map(sqlite_row_to_json).collect());
+
+            let count_sql = format!("SELECT COUNT(*) FROM {}{where_clause}", quote_ident(table));
+            let mut cq = sqlx::query_scalar::<_, i64>(&count_sql);
+            if !where_clause.is_empty() {
+                cq = cq.bind(query.filter_value.clone().unwrap_or_default());
+            }
+            let approx_total = cq.fetch_one(pool).await.map_err(|e| e.to_string())?;
+
+            Ok(RowsPage { rows, approx_total })
         }
     }
 }
@@ -754,6 +839,17 @@ mod tests {
         connect(DbKind::Sqlite, "sqlite::memory:").await.unwrap()
     }
 
+    fn default_rows_query() -> RowsQuery {
+        RowsQuery {
+            page: 1,
+            page_size: 100,
+            order_by: None,
+            order_desc: false,
+            filter_column: None,
+            filter_value: None,
+        }
+    }
+
     #[tokio::test]
     async fn sqlite_reports_a_server_version() {
         let v = server_version(&sqlite_memory().await).await.unwrap();
@@ -782,11 +878,89 @@ mod tests {
         assert_eq!(tables[0].name, "todos");
         assert_eq!(tables[0].kind, "BASE TABLE");
 
-        let rows = table_rows(&db, "main", "todos").await.unwrap();
+        let page = table_rows(&db, "main", "todos", &default_rows_query())
+            .await
+            .unwrap();
         assert_eq!(
-            rows,
+            page.rows,
             serde_json::json!([{"id": 1, "title": "buy milk", "done": 0}])
         );
+        assert_eq!(page.approx_total, 1);
+    }
+
+    #[tokio::test]
+    async fn sqlite_table_rows_pages_sorts_and_filters() {
+        let db = sqlite_memory().await;
+        run_query(
+            &db,
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)",
+        )
+        .await
+        .unwrap();
+        for name in ["banana", "apple", "cherry"] {
+            run_query(&db, &format!("INSERT INTO items (name) VALUES ('{name}')"))
+                .await
+                .unwrap();
+        }
+
+        let sorted = table_rows(
+            &db,
+            "main",
+            "items",
+            &RowsQuery {
+                page: 1,
+                page_size: 2,
+                order_by: Some("name".into()),
+                order_desc: false,
+                filter_column: None,
+                filter_value: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            sorted.rows,
+            serde_json::json!([{"id": 2, "name": "apple"}, {"id": 1, "name": "banana"}])
+        );
+        assert_eq!(sorted.approx_total, 3);
+
+        let page2 = table_rows(
+            &db,
+            "main",
+            "items",
+            &RowsQuery {
+                page: 2,
+                page_size: 2,
+                order_by: Some("name".into()),
+                order_desc: false,
+                filter_column: None,
+                filter_value: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(page2.rows, serde_json::json!([{"id": 3, "name": "cherry"}]));
+
+        let filtered = table_rows(
+            &db,
+            "main",
+            "items",
+            &RowsQuery {
+                page: 1,
+                page_size: 10,
+                order_by: None,
+                order_desc: false,
+                filter_column: Some("name".into()),
+                filter_value: Some("an".into()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            filtered.rows,
+            serde_json::json!([{"id": 1, "name": "banana"}])
+        );
+        assert_eq!(filtered.approx_total, 1);
     }
 
     #[tokio::test]

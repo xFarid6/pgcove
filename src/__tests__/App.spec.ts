@@ -205,11 +205,91 @@ describe("App", () => {
     });
   });
 
+  describe("data grid paging/sorting/filtering", () => {
+    beforeEach(() => {
+      vi.mocked(api.listPolicies).mockResolvedValue([]);
+      vi.mocked(api.listAuthUsers).mockResolvedValue([]);
+      vi.mocked(api.tableStructure).mockResolvedValue({ columns: [], indexes: [], constraints: [] });
+      vi.mocked(api.tableRows).mockResolvedValue({
+        rows: [{ id: 1, name: "a" }],
+        approxTotal: 100,
+      });
+    });
+
+    async function selectTable() {
+      const w = mount(App);
+      await flushPromises();
+      await w.find(".connection-list button.name").trigger("click");
+      await flushPromises();
+      await w.find(".table-list button").trigger("click");
+      await flushPromises();
+      return w;
+    }
+
+    it("loads the first page with defaults on table select", async () => {
+      await selectTable();
+      expect(api.tableRows).toHaveBeenCalledWith("c1", "main", "todos", {
+        page: 1,
+        pageSize: 50,
+        orderBy: undefined,
+        orderDesc: false,
+        filterColumn: undefined,
+        filterValue: undefined,
+      });
+    });
+
+    it("reloads with the sort column/direction and resets to page 1", async () => {
+      const w = await selectTable();
+      await w.findAll("th").find((t) => t.text().startsWith("name"))!.trigger("click");
+      await flushPromises();
+      expect(api.tableRows).toHaveBeenLastCalledWith("c1", "main", "todos", {
+        page: 1,
+        pageSize: 50,
+        orderBy: "name",
+        orderDesc: false,
+        filterColumn: undefined,
+        filterValue: undefined,
+      });
+
+      // Clicking the same header again flips direction instead of resetting it.
+      await w.findAll("th").find((t) => t.text().startsWith("name"))!.trigger("click");
+      await flushPromises();
+      expect(api.tableRows).toHaveBeenLastCalledWith(
+        "c1",
+        "main",
+        "todos",
+        expect.objectContaining({ orderBy: "name", orderDesc: true }),
+      );
+    });
+
+    it("reloads with the filter and resets to page 1", async () => {
+      const w = await selectTable();
+      await w.find("input[placeholder='filter column']").setValue("name");
+      await w.find("input[placeholder='filter value']").setValue("a");
+      await w.findAll("button").find((b) => b.text() === "Filter")!.trigger("click");
+      await flushPromises();
+      expect(api.tableRows).toHaveBeenLastCalledWith(
+        "c1",
+        "main",
+        "todos",
+        expect.objectContaining({ page: 1, filterColumn: "name", filterValue: "a" }),
+      );
+    });
+
+    it("shows the row error when a page load fails", async () => {
+      const w = await selectTable();
+      vi.mocked(api.tableRows).mockRejectedValue(new Error("connection reset"));
+      await w.findAll("button").find((b) => b.text() === "Next")!.trigger("click");
+      await flushPromises();
+      expect(w.text()).toContain("connection reset");
+    });
+  });
+
   describe("table structure tab", () => {
     beforeEach(() => {
       vi.mocked(api.listPolicies).mockResolvedValue([]);
       vi.mocked(api.listAuthUsers).mockResolvedValue([]);
-      vi.mocked(api.tableRows).mockResolvedValue([]);
+      vi.mocked(api.tableRows).mockResolvedValue({ rows: [], approxTotal: 0 });
     });
 
     it("loads structure on table select and shows it under the Structure tab", async () => {

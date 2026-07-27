@@ -44,6 +44,13 @@ const activeId = ref<string | null>(null);
 const tables = ref<TableInfo[]>([]);
 const activeTable = ref<TableInfo | null>(null);
 const rows = ref<Row[]>([]);
+const rowsPage = ref(1);
+const rowsPageSize = 50;
+const rowsApproxTotal = ref(0);
+const sortColumn = ref("");
+const sortDesc = ref(false);
+const filterColumn = ref("");
+const filterValue = ref("");
 const structure = ref<TableStructure | null>(null);
 const structureError = ref("");
 const policies = ref<PolicyInfo[]>([]);
@@ -165,20 +172,63 @@ async function onSelectTable(t: TableInfo) {
   if (!activeId.value) return;
   activeTable.value = t;
   tab.value = "data";
-  error.value = "";
   structureError.value = "";
   structure.value = null;
-  try {
-    rows.value = await tableRows(activeId.value, t.schema, t.name);
-  } catch (e) {
-    error.value = String(e);
-    rows.value = [];
-  }
+  rowsPage.value = 1;
+  sortColumn.value = "";
+  sortDesc.value = false;
+  filterColumn.value = "";
+  filterValue.value = "";
+  await loadRows();
   try {
     structure.value = await tableStructure(activeId.value, t.schema, t.name);
   } catch (e) {
     structureError.value = String(e);
   }
+}
+
+async function loadRows() {
+  if (!activeId.value || !activeTable.value) return;
+  error.value = "";
+  try {
+    const page = await tableRows(activeId.value, activeTable.value.schema, activeTable.value.name, {
+      page: rowsPage.value,
+      pageSize: rowsPageSize,
+      orderBy: sortColumn.value || undefined,
+      orderDesc: sortDesc.value,
+      filterColumn: filterColumn.value || undefined,
+      filterValue: filterValue.value || undefined,
+    });
+    rows.value = page.rows;
+    rowsApproxTotal.value = page.approxTotal;
+  } catch (e) {
+    error.value = String(e);
+    rows.value = [];
+    rowsApproxTotal.value = 0;
+  }
+}
+
+function onSort(column: string) {
+  if (sortColumn.value === column) {
+    sortDesc.value = !sortDesc.value;
+  } else {
+    sortColumn.value = column;
+    sortDesc.value = false;
+  }
+  rowsPage.value = 1;
+  loadRows();
+}
+
+function onRowsPage(page: number) {
+  rowsPage.value = page;
+  loadRows();
+}
+
+function onRowsFilter(column: string, value: string) {
+  filterColumn.value = column;
+  filterValue.value = value;
+  rowsPage.value = 1;
+  loadRows();
 }
 
 async function onRunQuery(sql: string) {
@@ -313,6 +363,15 @@ onMounted(refreshConnections);
         <DataGrid
           v-if="tab === 'data'"
           :rows="rows"
+          pageable
+          :page="rowsPage"
+          :page-size="rowsPageSize"
+          :approx-total="rowsApproxTotal"
+          :sort-column="sortColumn"
+          :sort-desc="sortDesc"
+          @sort="onSort"
+          @page="onRowsPage"
+          @filter="onRowsFilter"
         />
         <template v-else-if="tab === 'structure'">
           <p
