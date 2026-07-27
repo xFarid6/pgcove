@@ -390,6 +390,7 @@ mod tests {
             port: 6543,
             user: "postgres.abc123".into(),
             database: "postgres".into(),
+            supabase_url: None,
         }
     }
 

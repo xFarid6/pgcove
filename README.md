@@ -15,8 +15,34 @@ Built with **Tauri v2 + Vue 3 + TypeScript + Rust**
 **Status: scaffold.** Working today: connection manager (profiles on disk,
 password/service key in the OS keyring), schema browser (tables/views), table
 data view (`SELECT * … LIMIT 100` rendered in a grid), a query editor (below),
-and a Supabase panel reading real data from `pg_policies` and `auth.users`.
-Everything else is a filed issue — see the repo issues for the v1 plan.
+and a Supabase panel reading real data from `pg_policies`, `auth.users` and
+the project's HTTP API (below). Everything else is a filed issue — see the
+repo issues for the v1 plan.
+
+## Supabase project connections
+
+Pick **"Supabase project"** in the connection form (the default) and paste the
+project URL and service-role key alongside the database credentials. The
+project URL fills in the direct database host (`db.<ref>.supabase.co`) —
+overwrite it with the session pooler host if that's what your network needs.
+The service-role key goes to the OS keyring on its own entry, next to the
+database password, never to `connections.json`.
+
+With that in place the Supabase panel adds:
+
+- **Project** — a live self-check against the project's PostgREST root
+  (`/rest/v1/`): project ref, URL and PostgREST version. Reachability plus a
+  version string is the most a service-role key can actually tell you about
+  the project itself.
+- **Storage buckets** — `GET /storage/v1/bucket`, name/visibility/created.
+- **Edge functions** — *not* listed yet, and the panel says so rather than
+  showing anything invented. That endpoint is on the Management API proper
+  (`api.supabase.com/v1/projects/<ref>/functions`) and authenticates with a
+  personal/management access token, which is a different credential from the
+  service-role key; adding that second token is the fast-follow.
+
+Plain Postgres and SQLite connections are unchanged — a Supabase project is
+still a Postgres connection, it just also carries a project URL.
 
 ## Query editor
 
@@ -51,8 +77,9 @@ pnpm install
 pnpm tauri dev
 ```
 
-Add a connection: any reachable Postgres works. For Supabase use the
-**session pooler** credentials from the dashboard (host
+Add a connection: any reachable Postgres works — pick "Postgres" in the form.
+For Supabase, prefer the "Supabase project" variant above; if you only have
+database credentials, the **session pooler** ones work too (host
 `aws-0-<region>.pooler.supabase.com`, port 5432/6543, user
 `postgres.<project-ref>`); TLS is negotiated automatically
 (`sslmode=prefer`). The password goes to the OS keyring, never to disk.
@@ -72,7 +99,12 @@ connection — the Supabase panel just shows it as empty.
 pnpm test                       # frontend (Vitest)
 cd src-tauri; cargo test        # backend unit tests (no DB needed)
 PGCOVE_TEST_URL=postgres://u:p@host:5432/db cargo test -- --ignored  # live-DB + keyring tests
+# live Supabase project APIs (optional, also --ignored):
+PGCOVE_TEST_SUPABASE_URL=https://<ref>.supabase.co PGCOVE_TEST_SUPABASE_KEY=<service-role key> cargo test -- --ignored
 ```
+
+The Supabase HTTP client's URL/header construction and response parsing are
+covered by ordinary `cargo test` unit tests — no network needed.
 
 ## Open questions for a human
 
@@ -83,10 +115,12 @@ PGCOVE_TEST_URL=postgres://u:p@host:5432/db cargo test -- --ignored  # live-DB +
   `::text`) so the scaffold needs zero client-side type mapping. The query
   editor (issue #1) and in-grid editing (issue #2) will need real type
   handling — this was a deliberate scaffold shortcut, not the final design.
-- **Supabase = pooler connection for now.** The "Supabase project URL +
-  service key" connection style from the plan needs the Management API
-  (issue #5); the scaffold connects with plain Postgres credentials instead
-  so the panel shows real data from day one.
+- **Supabase = Postgres + a project URL, not its own driver.** Issue #5 added
+  the project URL + service-role key style as an optional `supabaseUrl` on a
+  normal Postgres connection rather than a third `DbKind`: the wire protocol
+  really is Postgres, and the HTTP APIs can't replace it (there is no SQL
+  endpoint reachable with a service-role key). Revisit if a future Supabase
+  API makes a URL-only connection genuinely useful.
 - **No live-DB test in CI**: Postgres wire protocol isn't mockable with
   wiremock; live tests are `#[ignore]`d behind `PGCOVE_TEST_URL`. Consider a
   Postgres service container in CI later.

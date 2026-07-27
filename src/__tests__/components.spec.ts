@@ -55,14 +55,60 @@ describe("ConnectionList", () => {
 });
 
 describe("ConnectionForm", () => {
-  it("submits a Postgres connection by default", async () => {
+  it("submits a plain Postgres connection", async () => {
     const w = mount(ConnectionForm);
+    await w.find("select").setValue("postgres");
     await w.find("input[placeholder^='Name']").setValue("prod");
     await w.find("form").trigger("submit");
     const [info, password] = w.emitted("save")![0] as [ConnectionInfo, string | undefined];
     expect(info.kind).toBe("postgres");
     expect(info.host).toBe("localhost");
+    expect(info.supabaseUrl).toBeUndefined();
     expect(password).toBeUndefined();
+  });
+
+  it("defaults to the Supabase project variant and carries url + service key", async () => {
+    const w = mount(ConnectionForm);
+    expect((w.find("select").element as HTMLSelectElement).value).toBe("supabase");
+    await w.find("input[placeholder^='Name']").setValue("supabase prod");
+    await w.find("input[placeholder^='Project URL']").setValue("https://abcdefgh.supabase.co");
+    await w.find("input[placeholder^='Service-role key']").setValue("sk-service");
+    await w.find("form").trigger("submit");
+    const [info, password, serviceKey] = w.emitted("save")![0] as [
+      ConnectionInfo,
+      string | undefined,
+      string | undefined,
+    ];
+    expect(info.kind).toBe("postgres");
+    expect(info.supabaseUrl).toBe("https://abcdefgh.supabase.co");
+    // Project URL fills in the direct database host Supabase gives every project.
+    expect(info.host).toBe("db.abcdefgh.supabase.co");
+    expect(info.user).toBe("postgres");
+    expect(password).toBeUndefined();
+    expect(serviceKey).toBe("sk-service");
+  });
+
+  it("does not submit a Supabase connection without a project URL", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("input[placeholder^='Name']").setValue("supabase prod");
+    await w.find("form").trigger("submit");
+    expect(w.emitted("save")).toBeUndefined();
+  });
+
+  it("never sends a service key on a non-Supabase connection", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("input[placeholder^='Project URL']").setValue("https://abcdefgh.supabase.co");
+    await w.find("input[placeholder^='Service-role key']").setValue("sk-service");
+    await w.find("select").setValue("postgres");
+    await w.find("input[placeholder^='Name']").setValue("prod");
+    await w.find("form").trigger("submit");
+    const [info, , serviceKey] = w.emitted("save")![0] as [
+      ConnectionInfo,
+      string | undefined,
+      string | undefined,
+    ];
+    expect(info.supabaseUrl).toBeUndefined();
+    expect(serviceKey).toBeUndefined();
   });
 
   it("switches to a file-path field and submits a SQLite connection", async () => {
@@ -190,5 +236,59 @@ describe("SupabasePanel", () => {
       },
     });
     expect(w.text()).toContain("not a Supabase database");
+  });
+
+  it("renders project info and storage buckets", () => {
+    const w = mount(SupabasePanel, {
+      props: {
+        policies: [],
+        authUsers: [],
+        authError: "",
+        projectInfo: {
+          projectRef: "abcdefgh",
+          url: "https://abcdefgh.supabase.co",
+          title: "PostgREST API",
+          description: "standard public schema",
+          restVersion: "12.2.0",
+        },
+        buckets: [
+          { id: "avatars", name: "avatars", public: true, createdAt: "2026-01-02", updatedAt: "2026-01-02" },
+          { id: "invoices", name: "invoices", public: false, createdAt: "2026-01-03", updatedAt: "2026-01-03" },
+        ],
+      },
+    });
+    expect(w.text()).toContain("abcdefgh");
+    expect(w.text()).toContain("PostgREST 12.2.0");
+    expect(w.text()).toContain("avatars");
+    expect(w.text()).toContain("public");
+    expect(w.text()).toContain("private");
+  });
+
+  it("falls back to a hint when the connection is not a Supabase project", () => {
+    const w = mount(SupabasePanel, {
+      props: { policies: [], authUsers: [], authError: "" },
+    });
+    expect(w.text()).toContain("Not a Supabase project connection");
+    expect(w.text()).toContain("No storage buckets");
+  });
+
+  it("shows the project error when the HTTP API call failed", () => {
+    const w = mount(SupabasePanel, {
+      props: {
+        policies: [],
+        authUsers: [],
+        authError: "",
+        projectError: "Supabase /rest/v1/ returned 401 Unauthorized",
+      },
+    });
+    expect(w.text()).toContain("401 Unauthorized");
+  });
+
+  it("says edge functions need a management token instead of faking rows", () => {
+    const w = mount(SupabasePanel, {
+      props: { policies: [], authUsers: [], authError: "" },
+    });
+    expect(w.text()).toContain("Edge functions");
+    expect(w.text()).toContain("management access token");
   });
 });

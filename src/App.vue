@@ -8,12 +8,16 @@ import {
   listTables,
   runQuery,
   saveConnection,
+  supabaseListBuckets,
+  supabaseProjectInfo,
   tableRows,
   testConnection,
   type AuthUser,
   type ConnectionInfo,
   type PolicyInfo,
   type Row,
+  type StorageBucket,
+  type SupabaseProjectInfo,
   type TableInfo,
 } from "./api";
 import ConnectionForm from "./components/ConnectionForm.vue";
@@ -31,6 +35,9 @@ const rows = ref<Row[]>([]);
 const policies = ref<PolicyInfo[]>([]);
 const authUsers = ref<AuthUser[]>([]);
 const authError = ref("");
+const projectInfo = ref<SupabaseProjectInfo | null>(null);
+const buckets = ref<StorageBucket[]>([]);
+const projectError = ref("");
 const tab = ref<"data" | "query" | "supabase">("data");
 const status = ref("");
 const error = ref("");
@@ -68,6 +75,26 @@ async function onSelect(id: string) {
     authUsers.value = [];
     authError.value = `auth.users not readable — not a Supabase database? (${e})`;
   }
+  await refreshSupabaseProject(id);
+}
+
+/** Project URL + service-role key APIs; only Supabase connections have them. */
+async function refreshSupabaseProject(id: string) {
+  projectInfo.value = null;
+  buckets.value = [];
+  projectError.value = "";
+  if (!connections.value.find((c) => c.id === id)?.supabaseUrl) return;
+  try {
+    projectInfo.value = await supabaseProjectInfo(id);
+  } catch (e) {
+    projectError.value = String(e);
+    return;
+  }
+  try {
+    buckets.value = await supabaseListBuckets(id);
+  } catch {
+    buckets.value = [];
+  }
 }
 
 async function onSelectTable(t: TableInfo) {
@@ -97,8 +124,12 @@ async function onRunQuery(sql: string) {
   }
 }
 
-async function onSave(info: ConnectionInfo, password: string | undefined) {
-  await saveConnection(info, password);
+async function onSave(
+  info: ConnectionInfo,
+  password: string | undefined,
+  serviceKey: string | undefined,
+) {
+  await saveConnection(info, password, serviceKey);
   await refreshConnections();
 }
 
@@ -203,6 +234,9 @@ onMounted(refreshConnections);
           :policies="policies"
           :auth-users="authUsers"
           :auth-error="authError"
+          :project-info="projectInfo"
+          :buckets="buckets"
+          :project-error="projectError"
         />
       </template>
       <p
