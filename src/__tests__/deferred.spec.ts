@@ -28,5 +28,8 @@ describe("deferred features", () => {
   // in components.spec.ts (MigrationsPanel emits) and App.spec.ts (load/run
   // wiring). Folder picking is a text path input, same call as issue #4's
   // SQLite path field — no native file-picker dialog dependency added.
-  test.todo("export results as CSV/JSON (issue #12)");
+  // Issue #12 shipped: CSV/JSON export of the grid's current rows is covered
+  // in export.spec.ts (CSV escaping, JSON round-trip). Export is a Blob +
+  // anchor download in the browser — same "no native dialog dependency"
+  // pattern as issues #4/#10 — so there is nothing to add on the Rust side.
 });
