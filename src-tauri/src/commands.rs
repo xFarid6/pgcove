@@ -1,6 +1,7 @@
 //! Tauri commands — the IPC surface the Vue frontend calls via `invoke`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::Manager;
 
 use crate::connections::{self, ConnectionInfo, DbKind};
@@ -8,10 +9,42 @@ use crate::db::{
     self, AuthUser, Db, PolicyDraft, PolicyInfo, RowsPage, RowsQuery, TableInfo, TableStructure,
 };
 use crate::migrations::{self, MigrationInfo};
+use crate::ssh_tunnel::{self, SshTunnels, TunnelHandle};
 use crate::supabase::{AdminUser, ProjectInfo, StorageBucket, SupabaseClient};
 
 fn store_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
+}
+
+/// Returns the active tunnel for `id`, starting one if this is the first
+/// call since the app launched (or since the connection was last saved/
+/// deleted — see `save_connection`/`delete_connection`, which evict the
+/// cached entry so an edited or removed tunnel config can't linger).
+async fn ensure_tunnel(
+    app: &tauri::AppHandle,
+    id: &str,
+    info: &ConnectionInfo,
+) -> Result<Arc<TunnelHandle>, String> {
+    let cfg = info
+        .ssh_tunnel
+        .as_ref()
+        .ok_or_else(|| "this connection has no SSH tunnel configured".to_string())?;
+    if let Some(existing) = app.state::<SshTunnels>().0.lock().unwrap().get(id) {
+        return Ok(existing.clone());
+    }
+    // Missing keyring entry just means "no secret" — fine for a passphrase-
+    // less key; password auth without one fails downstream with a clear
+    // "could not sign in" message instead of a keyring-specific error here.
+    let secret = connections::get_ssh_secret(id).unwrap_or_default();
+    let handle = Arc::new(
+        ssh_tunnel::start(cfg, &secret, &store_dir(app)?, info.host.clone(), info.port).await?,
+    );
+    app.state::<SshTunnels>()
+        .0
+        .lock()
+        .unwrap()
+        .insert(id.to_string(), handle.clone());
+    Ok(handle)
 }
 
 async fn pool_for(app: &tauri::AppHandle, id: &str) -> Result<Db, String> {
@@ -22,7 +55,13 @@ async fn pool_for(app: &tauri::AppHandle, id: &str) -> Result<Db, String> {
         DbKind::Sqlite => String::new(),
         DbKind::Postgres => connections::get_password(id)?,
     };
-    db::connect(info.kind, &db::connection_url(&info, &password)).await
+    let mut effective = info.clone();
+    if info.ssh_tunnel.is_some() {
+        let tunnel = ensure_tunnel(app, id, &info).await?;
+        effective.host = "127.0.0.1".to_string();
+        effective.port = tunnel.local_port;
+    }
+    db::connect(effective.kind, &db::connection_url(&effective, &password)).await
 }
 
 /// Same shape as `pool_for`, for the Supabase HTTP APIs: project URL from the
@@ -49,12 +88,17 @@ pub fn save_connection(
     info: ConnectionInfo,
     password: Option<String>,
     service_key: Option<String>,
+    ssh_secret: Option<String>,
 ) -> Result<(), String> {
-    connections::save(&store_dir(&app)?, info, password, service_key)
+    // Evict any tunnel already running under the old config — otherwise an
+    // edited bastion/auth method wouldn't take effect until app restart.
+    app.state::<SshTunnels>().0.lock().unwrap().remove(&info.id);
+    connections::save(&store_dir(&app)?, info, password, service_key, ssh_secret)
 }
 
 #[tauri::command]
 pub fn delete_connection(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    app.state::<SshTunnels>().0.lock().unwrap().remove(&id);
     connections::delete(&store_dir(&app)?, &id)
 }
 

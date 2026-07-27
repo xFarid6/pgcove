@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import type { ConnectionInfo } from "../api";
+import type { ConnectionInfo, SshTunnelConfig } from "../api";
 
 const emit = defineEmits<{
-  save: [info: ConnectionInfo, password: string | undefined, serviceKey: string | undefined];
+  save: [
+    info: ConnectionInfo,
+    password: string | undefined,
+    serviceKey: string | undefined,
+    sshSecret: string | undefined,
+  ];
 }>();
 
 /**
@@ -23,6 +28,16 @@ const password = ref("");
 const projectUrl = ref("");
 const serviceKey = ref("");
 
+// SSH tunnel (issue #11) — only offered for postgres/supabase, not sqlite
+// (a local file has nothing to tunnel to).
+const sshEnabled = ref(false);
+const sshHost = ref("");
+const sshPort = ref(22);
+const sshUser = ref("");
+const sshAuthMethod = ref<"agent" | "key" | "password">("key");
+const sshKeyPath = ref("");
+const sshSecret = ref("");
+
 /** `https://abcdefgh.supabase.co` -> `abcdefgh`; null for anything else. */
 function projectRefOf(url: string): string | null {
   const hostname = url.trim().replace(/^https?:\/\//, "").split("/")[0];
@@ -41,8 +56,34 @@ watch(projectUrl, (url) => {
   database.value = "postgres";
 });
 
+/** `undefined` when the SSH section isn't filled in enough to tunnel with. */
+function sshTunnelConfig(): SshTunnelConfig | undefined {
+  if (!sshEnabled.value || !sshHost.value.trim() || !sshUser.value.trim()) return undefined;
+  return {
+    host: sshHost.value.trim(),
+    port: sshPort.value,
+    user: sshUser.value.trim(),
+    auth:
+      sshAuthMethod.value === "agent"
+        ? { method: "agent" }
+        : sshAuthMethod.value === "key"
+          ? { method: "key", keyPath: sshKeyPath.value.trim() }
+          : { method: "password" },
+  };
+}
+
+function resetSshFields() {
+  sshEnabled.value = false;
+  sshHost.value = "";
+  sshPort.value = 22;
+  sshUser.value = "";
+  sshKeyPath.value = "";
+  sshSecret.value = "";
+}
+
 function submit() {
   if (!name.value.trim()) return;
+  const sshTunnel = variant.value === "sqlite" ? undefined : sshTunnelConfig();
   if (variant.value === "sqlite") {
     if (!filePath.value.trim()) return;
     emit("save", {
@@ -53,7 +94,7 @@ function submit() {
       port: 0,
       user: "",
       database: filePath.value.trim(),
-    }, undefined, undefined);
+    }, undefined, undefined, undefined);
     name.value = "";
     filePath.value = "";
     return;
@@ -72,13 +113,16 @@ function submit() {
       user: user.value.trim(),
       database: database.value.trim(),
       ...(isSupabase ? { supabaseUrl: projectUrl.value.trim() } : {}),
+      ...(sshTunnel ? { sshTunnel } : {}),
     },
     password.value || undefined,
     isSupabase ? serviceKey.value || undefined : undefined,
+    sshTunnel ? sshSecret.value || undefined : undefined,
   );
   name.value = "";
   password.value = "";
   serviceKey.value = "";
+  resetSshFields();
 }
 </script>
 
@@ -142,6 +186,53 @@ function submit() {
         type="password"
         placeholder="Password (stored in OS keyring)"
       >
+      <details class="ssh-section">
+        <summary>
+          <input
+            v-model="sshEnabled"
+            type="checkbox"
+            @click.stop
+          >
+          Connect through an SSH tunnel
+        </summary>
+        <template v-if="sshEnabled">
+          <input
+            v-model="sshHost"
+            placeholder="SSH host (bastion)"
+          >
+          <input
+            v-model.number="sshPort"
+            type="number"
+            placeholder="SSH port"
+          >
+          <input
+            v-model="sshUser"
+            placeholder="SSH user"
+          >
+          <select v-model="sshAuthMethod">
+            <option value="agent">
+              SSH agent
+            </option>
+            <option value="key">
+              Private key
+            </option>
+            <option value="password">
+              Password
+            </option>
+          </select>
+          <input
+            v-if="sshAuthMethod === 'key'"
+            v-model="sshKeyPath"
+            placeholder="Private key path (e.g. ~/.ssh/id_ed25519)"
+          >
+          <input
+            v-if="sshAuthMethod !== 'agent'"
+            v-model="sshSecret"
+            type="password"
+            :placeholder="sshAuthMethod === 'key' ? 'Key passphrase, if any (stored in OS keyring)' : 'SSH password (stored in OS keyring)'"
+          >
+        </template>
+      </details>
     </template>
     <button type="submit">
       Add connection

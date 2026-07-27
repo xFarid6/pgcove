@@ -130,6 +130,46 @@ describe("ConnectionForm", () => {
     await w.find("form").trigger("submit");
     expect(w.emitted("save")).toBeUndefined();
   });
+
+  it("carries an SSH tunnel config and secret when the section is filled in", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("select").setValue("postgres");
+    await w.find("input[placeholder^='Name']").setValue("prod via bastion");
+    await w.find("input[type=checkbox]").setValue(true);
+    await w.find("input[placeholder='SSH host (bastion)']").setValue("bastion.example.com");
+    await w.find("input[placeholder='SSH user']").setValue("deploy");
+    await w.find("input[placeholder^='Private key path']").setValue("~/.ssh/id_ed25519");
+    await w.find("input[type=password][placeholder*='passphrase']").setValue("s3cret");
+    await w.find("form").trigger("submit");
+    const [info, , , sshSecret] = w.emitted("save")![0] as [
+      ConnectionInfo,
+      string | undefined,
+      string | undefined,
+      string | undefined,
+    ];
+    expect(info.sshTunnel).toEqual({
+      host: "bastion.example.com",
+      port: 22,
+      user: "deploy",
+      auth: { method: "key", keyPath: "~/.ssh/id_ed25519" },
+    });
+    expect(sshSecret).toBe("s3cret");
+  });
+
+  it("leaves sshTunnel unset when the section is left collapsed", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("select").setValue("postgres");
+    await w.find("input[placeholder^='Name']").setValue("prod");
+    await w.find("form").trigger("submit");
+    const [info, , , sshSecret] = w.emitted("save")![0] as [
+      ConnectionInfo,
+      string | undefined,
+      string | undefined,
+      string | undefined,
+    ];
+    expect(info.sshTunnel).toBeUndefined();
+    expect(sshSecret).toBeUndefined();
+  });
 });
 
 const tables: TableInfo[] = [

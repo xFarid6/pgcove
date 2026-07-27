@@ -721,6 +721,7 @@ mod tests {
             user: "postgres.abc123".into(),
             database: "postgres".into(),
             supabase_url: None,
+            ssh_tunnel: None,
         }
     }
 

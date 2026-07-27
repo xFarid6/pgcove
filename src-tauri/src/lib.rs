@@ -1,13 +1,16 @@
 pub mod commands;
 pub mod connections;
 pub mod db;
+pub mod known_hosts;
 pub mod migrations;
+pub mod ssh_tunnel;
 pub mod supabase;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(ssh_tunnel::SshTunnels::default())
         .invoke_handler(tauri::generate_handler![
             commands::list_connections,
             commands::save_connection,
