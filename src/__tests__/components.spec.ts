@@ -171,6 +171,45 @@ describe("DataGrid", () => {
     const w = mount(DataGrid, { props: { rows: [] } });
     expect(w.text()).toContain("No rows");
   });
+
+  it("emits sort when a header is clicked, without needing pageable", async () => {
+    const w = mount(DataGrid, { props: { rows: [{ id: 1, name: "a" }] } });
+    await w.findAll("th").find((t) => t.text().startsWith("name"))!.trigger("click");
+    expect(w.emitted("sort")).toEqual([["name"]]);
+  });
+
+  it("shows a sort indicator on the active sort column", () => {
+    const w = mount(DataGrid, {
+      props: { rows: [{ id: 1, name: "a" }], sortColumn: "name", sortDesc: true },
+    });
+    const header = w.findAll("th").find((t) => t.text().startsWith("name"))!;
+    expect(header.text()).toContain("▼");
+  });
+
+  it("hides pager/filter controls unless pageable", () => {
+    const w = mount(DataGrid, { props: { rows: [] } });
+    expect(w.find(".controls").exists()).toBe(false);
+  });
+
+  it("emits page for prev/next and clamps at the edges", async () => {
+    const w = mount(DataGrid, {
+      props: { rows: [], pageable: true, page: 2, pageSize: 10, approxTotal: 25 },
+    });
+    expect(w.text()).toContain("Page 2 / 3");
+    await w.findAll("button").find((b) => b.text() === "Prev")!.trigger("click");
+    await w.findAll("button").find((b) => b.text() === "Next")!.trigger("click");
+    expect(w.emitted("page")).toEqual([[1], [3]]);
+  });
+
+  it("emits filter with the column and value", async () => {
+    const w = mount(DataGrid, {
+      props: { rows: [{ id: 1, name: "a" }], pageable: true },
+    });
+    await w.find("input[placeholder='filter column']").setValue("name");
+    await w.find("input[placeholder='filter value']").setValue("a");
+    await w.findAll("button").find((b) => b.text() === "Filter")!.trigger("click");
+    expect(w.emitted("filter")).toEqual([["name", "a"]]);
+  });
 });
 
 describe("QueryEditor", () => {

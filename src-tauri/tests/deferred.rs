@@ -36,9 +36,5 @@ async fn fetches_project_info_and_buckets_from_a_live_project() {
 fn lists_edge_functions_via_management_api() {}
 
 #[test]
-#[ignore = "not implemented — data grid pagination/sorting, see pgcove issue #9"]
-fn paginates_table_rows() {}
-
-#[test]
 #[ignore = "not implemented — SSH tunnel connections, see pgcove issue #11"]
 fn connects_through_ssh_tunnel() {}

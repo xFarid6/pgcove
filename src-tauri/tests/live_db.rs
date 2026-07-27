@@ -8,6 +8,18 @@
 
 use pgcove_lib::connections::DbKind;
 use pgcove_lib::db;
+use pgcove_lib::db::RowsQuery;
+
+fn default_rows_query() -> RowsQuery {
+    RowsQuery {
+        page: 1,
+        page_size: 100,
+        order_by: None,
+        order_desc: false,
+        filter_column: None,
+        filter_value: None,
+    }
+}
 
 async fn pool() -> db::Db {
     let url = std::env::var("PGCOVE_TEST_URL")
@@ -30,9 +42,99 @@ async fn lists_tables_and_reads_rows() {
     let p = pool().await;
     let tables = db::list_tables(&p).await.unwrap();
     if let Some(t) = tables.first() {
-        let rows = db::table_rows(&p, &t.schema, &t.name).await.unwrap();
-        assert!(rows.is_array());
+        let page = db::table_rows(&p, &t.schema, &t.name, &default_rows_query())
+            .await
+            .unwrap();
+        assert!(page.rows.is_array());
     }
+}
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn pages_sorts_and_filters_table_rows() {
+    let p = pool().await;
+    let table = "pgcove_test_paging";
+
+    db::execute_ddl(&p, &format!("DROP TABLE IF EXISTS {table}"))
+        .await
+        .unwrap();
+    db::execute_ddl(&p, &format!("CREATE TABLE {table} (id int, name text)"))
+        .await
+        .unwrap();
+    db::execute_ddl(
+        &p,
+        &format!(
+            "INSERT INTO {table} (id, name) VALUES (1, 'banana'), (2, 'apple'), (3, 'cherry')"
+        ),
+    )
+    .await
+    .unwrap();
+    // approx_total reads pg_class.reltuples, only refreshed by ANALYZE/VACUUM.
+    db::execute_ddl(&p, &format!("ANALYZE {table}"))
+        .await
+        .unwrap();
+
+    let sorted = db::table_rows(
+        &p,
+        "public",
+        table,
+        &RowsQuery {
+            page: 1,
+            page_size: 2,
+            order_by: Some("name".into()),
+            order_desc: false,
+            filter_column: None,
+            filter_value: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        sorted.rows,
+        serde_json::json!([{"id": 2, "name": "apple"}, {"id": 1, "name": "banana"}])
+    );
+    assert_eq!(sorted.approx_total, 3);
+
+    let page2 = db::table_rows(
+        &p,
+        "public",
+        table,
+        &RowsQuery {
+            page: 2,
+            page_size: 2,
+            order_by: Some("name".into()),
+            order_desc: false,
+            filter_column: None,
+            filter_value: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(page2.rows, serde_json::json!([{"id": 3, "name": "cherry"}]));
+
+    let filtered = db::table_rows(
+        &p,
+        "public",
+        table,
+        &RowsQuery {
+            page: 1,
+            page_size: 10,
+            order_by: None,
+            order_desc: false,
+            filter_column: Some("name".into()),
+            filter_value: Some("an".into()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        filtered.rows,
+        serde_json::json!([{"id": 1, "name": "banana"}])
+    );
+
+    db::execute_ddl(&p, &format!("DROP TABLE {table}"))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

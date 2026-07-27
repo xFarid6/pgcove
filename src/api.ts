@@ -83,6 +83,21 @@ export interface StorageBucket {
 /** A table row as serialized by Postgres row_to_json. */
 export type Row = Record<string, unknown>;
 
+export interface RowsQuery {
+  page: number;
+  pageSize: number;
+  orderBy?: string;
+  orderDesc: boolean;
+  filterColumn?: string;
+  filterValue?: string;
+}
+
+export interface RowsPage {
+  rows: Row[];
+  /** An estimate (pg_class.reltuples), not an exact count. */
+  approxTotal: number;
+}
+
 export interface ColumnInfo {
   name: string;
   dataType: string;
@@ -134,8 +149,8 @@ export const testConnection = (id: string) =>
 export const listTables = (connectionId: string) =>
   invoke<TableInfo[]>("list_tables", { connectionId });
 
-export const tableRows = (connectionId: string, schema: string, table: string) =>
-  invoke<Row[]>("table_rows", { connectionId, schema, table });
+export const tableRows = (connectionId: string, schema: string, table: string, query: RowsQuery) =>
+  invoke<RowsPage>("table_rows", { connectionId, schema, table, query });
 
 /** Run a single SELECT-shaped statement; other statement kinds are a follow-up. */
 export const runQuery = (connectionId: string, sql: string) =>
