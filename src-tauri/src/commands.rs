@@ -7,6 +7,7 @@ use crate::connections::{self, ConnectionInfo, DbKind};
 use crate::db::{
     self, AuthUser, Db, PolicyDraft, PolicyInfo, RowsPage, RowsQuery, TableInfo, TableStructure,
 };
+use crate::migrations::{self, MigrationInfo};
 use crate::supabase::{AdminUser, ProjectInfo, StorageBucket, SupabaseClient};
 
 fn store_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -122,6 +123,29 @@ pub async fn list_auth_users(
 ) -> Result<Vec<AuthUser>, String> {
     let pool = pool_for(&app, &connection_id).await?;
     db::list_auth_users(&pool).await
+}
+
+#[tauri::command]
+pub async fn migration_status(
+    app: tauri::AppHandle,
+    connection_id: String,
+    folder: String,
+    table: Option<String>,
+) -> Result<Vec<MigrationInfo>, String> {
+    let pool = pool_for(&app, &connection_id).await?;
+    migrations::migration_status(&pool, std::path::Path::new(&folder), table.as_deref()).await
+}
+
+/// Runs pending `.sql` files in `folder`; see `migrations::apply_pending`.
+#[tauri::command]
+pub async fn apply_pending_migrations(
+    app: tauri::AppHandle,
+    connection_id: String,
+    folder: String,
+    table: Option<String>,
+) -> Result<Vec<String>, String> {
+    let pool = pool_for(&app, &connection_id).await?;
+    migrations::apply_pending(&pool, std::path::Path::new(&folder), table.as_deref()).await
 }
 
 #[tauri::command]
