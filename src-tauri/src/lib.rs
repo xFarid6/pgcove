@@ -14,6 +14,7 @@ pub fn run() {
             commands::test_connection,
             commands::list_tables,
             commands::table_rows,
+            commands::table_structure,
             commands::run_query,
             commands::list_policies,
             commands::create_policy_sql,

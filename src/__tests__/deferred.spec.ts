@@ -18,7 +18,9 @@ describe("deferred features", () => {
   // Issue #7 shipped: admin-API search/pagination/ban/delete is covered in
   // components.spec.ts (SupabasePanel emits) and App.spec.ts (load/ban/delete
   // wiring). SQL fallback for pooler-only connections stays read-only.
-  test.todo("table structure/DDL tab (issue #8)");
+  // Issue #8 shipped: the Structure tab (columns/indexes/constraints,
+  // reusing DataGrid) is covered in components.spec.ts and App.spec.ts.
+  // DDL editing from that tab is a separate fast-follow, not this issue.
   test.todo("data grid pagination + sorting (issue #9)");
   test.todo("export results as CSV/JSON (issue #12)");
 });

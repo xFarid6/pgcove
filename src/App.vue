@@ -19,6 +19,7 @@ import {
   supabaseListUsers,
   supabaseProjectInfo,
   tableRows,
+  tableStructure,
   testConnection,
   type AdminUser,
   type AuthUser,
@@ -29,6 +30,7 @@ import {
   type StorageBucket,
   type SupabaseProjectInfo,
   type TableInfo,
+  type TableStructure,
 } from "./api";
 import ConnectionForm from "./components/ConnectionForm.vue";
 import ConnectionList from "./components/ConnectionList.vue";
@@ -42,6 +44,8 @@ const activeId = ref<string | null>(null);
 const tables = ref<TableInfo[]>([]);
 const activeTable = ref<TableInfo | null>(null);
 const rows = ref<Row[]>([]);
+const structure = ref<TableStructure | null>(null);
+const structureError = ref("");
 const policies = ref<PolicyInfo[]>([]);
 const authUsers = ref<AuthUser[]>([]);
 const authError = ref("");
@@ -51,7 +55,7 @@ const projectError = ref("");
 const adminUsers = ref<AdminUser[]>([]);
 const adminUsersError = ref("");
 const adminPage = ref(1);
-const tab = ref<"data" | "query" | "supabase">("data");
+const tab = ref<"data" | "structure" | "query" | "supabase">("data");
 const status = ref("");
 const error = ref("");
 const queryRows = ref<Row[]>([]);
@@ -162,11 +166,18 @@ async function onSelectTable(t: TableInfo) {
   activeTable.value = t;
   tab.value = "data";
   error.value = "";
+  structureError.value = "";
+  structure.value = null;
   try {
     rows.value = await tableRows(activeId.value, t.schema, t.name);
   } catch (e) {
     error.value = String(e);
     rows.value = [];
+  }
+  try {
+    structure.value = await tableStructure(activeId.value, t.schema, t.name);
+  } catch (e) {
+    structureError.value = String(e);
   }
 }
 
@@ -265,6 +276,13 @@ onMounted(refreshConnections);
           Data
         </button>
         <button
+          :class="{ active: tab === 'structure' }"
+          :disabled="!activeTable"
+          @click="tab = 'structure'"
+        >
+          Structure
+        </button>
+        <button
           :class="{ active: tab === 'query' }"
           @click="tab = 'query'"
         >
@@ -296,6 +314,22 @@ onMounted(refreshConnections);
           v-if="tab === 'data'"
           :rows="rows"
         />
+        <template v-else-if="tab === 'structure'">
+          <p
+            v-if="structureError"
+            class="error"
+          >
+            {{ structureError }}
+          </p>
+          <template v-else>
+            <h2>Columns</h2>
+            <DataGrid :rows="structure?.columns ?? []" />
+            <h2>Indexes</h2>
+            <DataGrid :rows="structure?.indexes ?? []" />
+            <h2>Constraints</h2>
+            <DataGrid :rows="structure?.constraints ?? []" />
+          </template>
+        </template>
         <template v-else-if="tab === 'query'">
           <QueryEditor
             :running="queryRunning"
