@@ -38,6 +38,17 @@ export interface PolicyInfo {
   expression: string;
 }
 
+export interface PolicyDraft {
+  schema: string;
+  table: string;
+  name: string;
+  /** SELECT | INSERT | UPDATE | DELETE | ALL */
+  command: string;
+  roles: string[];
+  usingExpr?: string;
+  checkExpr?: string;
+}
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -96,6 +107,23 @@ export const runQuery = (connectionId: string, sql: string) =>
 
 export const listPolicies = (connectionId: string) =>
   invoke<PolicyInfo[]>("list_policies", { connectionId });
+
+/** Preview commands — pure string generation, no DB round-trip. */
+export const createPolicySql = (draft: PolicyDraft) =>
+  invoke<string>("create_policy_sql", { draft });
+
+export const alterPolicySql = (draft: PolicyDraft) =>
+  invoke<string>("alter_policy_sql", { draft });
+
+export const dropPolicySql = (schema: string, table: string, name: string) =>
+  invoke<string>("drop_policy_sql", { schema, table, name });
+
+export const rlsSql = (schema: string, table: string, enable: boolean) =>
+  invoke<string>("rls_sql", { schema, table, enable });
+
+/** Runs a statement already confirmed via one of the `*Sql` preview calls above. */
+export const executeDdl = (connectionId: string, sql: string) =>
+  invoke<void>("execute_ddl", { connectionId, sql });
 
 export const listAuthUsers = (connectionId: string) =>
   invoke<AuthUser[]>("list_auth_users", { connectionId });

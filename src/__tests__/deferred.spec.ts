@@ -12,7 +12,9 @@ describe("deferred features", () => {
   // api.spec.ts and App.spec.ts. Only the edge-function half is still out of
   // reach — it needs a management access token, not the service-role key.
   test.todo("Supabase edge function list (fast-follow to #5 — needs a management access token)");
-  test.todo("RLS policy create/edit dialog (issue #6)");
+  // Issue #6 shipped: RLS policy create/alter/drop + RLS toggle form is
+  // covered in components.spec.ts (SupabasePanel emits) and App.spec.ts
+  // (confirm-then-execute-then-refresh wiring).
   test.todo("auth users search/pagination/actions (issue #7)");
   test.todo("table structure/DDL tab (issue #8)");
   test.todo("data grid pagination + sorting (issue #9)");

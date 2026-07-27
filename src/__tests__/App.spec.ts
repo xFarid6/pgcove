@@ -13,6 +13,11 @@ vi.mock("../api", () => ({
   testConnection: vi.fn(),
   supabaseProjectInfo: vi.fn(),
   supabaseListBuckets: vi.fn(),
+  createPolicySql: vi.fn(),
+  alterPolicySql: vi.fn(),
+  dropPolicySql: vi.fn(),
+  rlsSql: vi.fn(),
+  executeDdl: vi.fn(),
 }));
 
 import * as api from "../api";
@@ -133,5 +138,61 @@ describe("App", () => {
     expect(api.supabaseListBuckets).not.toHaveBeenCalled();
     await w.findAll(".toolbar button")[2].trigger("click");
     expect(w.text()).toContain("401 Unauthorized");
+  });
+
+  describe("RLS policy DDL", () => {
+    beforeEach(() => {
+      vi.mocked(api.listPolicies).mockResolvedValue([]);
+      vi.mocked(api.listAuthUsers).mockResolvedValue([]);
+    });
+
+    async function openPolicyForm() {
+      const w = mount(App);
+      await flushPromises();
+      await w.find(".connection-list button.name").trigger("click");
+      await flushPromises();
+      await w.findAll(".toolbar button")[2].trigger("click");
+      await w.find("input[placeholder='table']").setValue("todos");
+      await w.find("input[placeholder='policy name']").setValue("own rows");
+      return w;
+    }
+
+    it("executes a confirmed create-policy statement and refreshes policies", async () => {
+      window.confirm = vi.fn().mockReturnValue(true);
+      vi.mocked(api.createPolicySql).mockResolvedValue("CREATE POLICY ...;");
+
+      const w = await openPolicyForm();
+      await w.find(".supabase-panel form").trigger("submit");
+      await flushPromises();
+
+      expect(api.createPolicySql).toHaveBeenCalledWith(
+        expect.objectContaining({ table: "todos", name: "own rows" }),
+      );
+      expect(api.executeDdl).toHaveBeenCalledWith("c1", "CREATE POLICY ...;");
+      expect(api.listPolicies).toHaveBeenCalledTimes(2); // initial select + post-DDL refresh
+    });
+
+    it("does not execute when the user cancels the confirm dialog", async () => {
+      window.confirm = vi.fn().mockReturnValue(false);
+      vi.mocked(api.createPolicySql).mockResolvedValue("CREATE POLICY ...;");
+
+      const w = await openPolicyForm();
+      await w.find(".supabase-panel form").trigger("submit");
+      await flushPromises();
+
+      expect(api.executeDdl).not.toHaveBeenCalled();
+    });
+
+    it("shows the ddl error when execution fails", async () => {
+      window.confirm = vi.fn().mockReturnValue(true);
+      vi.mocked(api.createPolicySql).mockResolvedValue("CREATE POLICY ...;");
+      vi.mocked(api.executeDdl).mockRejectedValue(new Error("permission denied"));
+
+      const w = await openPolicyForm();
+      await w.find(".supabase-panel form").trigger("submit");
+      await flushPromises();
+
+      expect(w.text()).toContain("permission denied");
+    });
   });
 });

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 use crate::connections::{self, ConnectionInfo, DbKind};
-use crate::db::{self, AuthUser, Db, PolicyInfo, TableInfo};
+use crate::db::{self, AuthUser, Db, PolicyDraft, PolicyInfo, TableInfo};
 use crate::supabase::{ProjectInfo, StorageBucket, SupabaseClient};
 
 fn store_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -108,6 +108,38 @@ pub async fn list_auth_users(
 ) -> Result<Vec<AuthUser>, String> {
     let pool = pool_for(&app, &connection_id).await?;
     db::list_auth_users(&pool).await
+}
+
+#[tauri::command]
+pub fn create_policy_sql(draft: PolicyDraft) -> String {
+    db::create_policy_sql(&draft)
+}
+
+#[tauri::command]
+pub fn alter_policy_sql(draft: PolicyDraft) -> String {
+    db::alter_policy_sql(&draft)
+}
+
+#[tauri::command]
+pub fn drop_policy_sql(schema: String, table: String, name: String) -> String {
+    db::drop_policy_sql(&schema, &table, &name)
+}
+
+#[tauri::command]
+pub fn rls_sql(schema: String, table: String, enable: bool) -> String {
+    db::rls_sql(&schema, &table, enable)
+}
+
+/// Runs a statement the user already confirmed via one of the `*_sql`
+/// preview commands above.
+#[tauri::command]
+pub async fn execute_ddl(
+    app: tauri::AppHandle,
+    connection_id: String,
+    sql: String,
+) -> Result<(), String> {
+    let pool = pool_for(&app, &connection_id).await?;
+    db::execute_ddl(&pool, &sql).await
 }
 
 /// Project self-check over HTTP — reachability plus the PostgREST version,

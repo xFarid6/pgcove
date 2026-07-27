@@ -36,10 +36,6 @@ async fn fetches_project_info_and_buckets_from_a_live_project() {
 fn lists_edge_functions_via_management_api() {}
 
 #[test]
-#[ignore = "not implemented — RLS policy editor, see pgcove issue #6"]
-fn creates_and_drops_an_rls_policy() {}
-
-#[test]
 #[ignore = "not implemented — data grid pagination/sorting, see pgcove issue #9"]
 fn paginates_table_rows() {}
 

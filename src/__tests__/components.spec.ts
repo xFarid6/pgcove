@@ -291,4 +291,61 @@ describe("SupabasePanel", () => {
     expect(w.text()).toContain("Edge functions");
     expect(w.text()).toContain("management access token");
   });
+
+  it("emits create-policy with the form fields", async () => {
+    const w = mount(SupabasePanel, {
+      props: { policies: [], authUsers: [], authError: "" },
+    });
+    await w.find("input[placeholder='table']").setValue("todos");
+    await w.find("input[placeholder='policy name']").setValue("own rows");
+    await w.find("select").setValue("SELECT");
+    await w.find("input[placeholder^='roles']").setValue("authenticated, service_role");
+    await w.find("textarea[placeholder='USING expression']").setValue("auth.uid() = user_id");
+    await w.find("form").trigger("submit");
+    expect(w.emitted("create-policy")).toEqual([
+      [
+        {
+          schema: "public",
+          table: "todos",
+          name: "own rows",
+          command: "SELECT",
+          roles: ["authenticated", "service_role"],
+          usingExpr: "auth.uid() = user_id",
+          checkExpr: undefined,
+        },
+      ],
+    ]);
+  });
+
+  it("does not emit create-policy without a table and name", async () => {
+    const w = mount(SupabasePanel, {
+      props: { policies: [], authUsers: [], authError: "" },
+    });
+    await w.find("form").trigger("submit");
+    expect(w.emitted("create-policy")).toBeUndefined();
+  });
+
+  it("emits toggle-rls with the current schema/table", async () => {
+    const w = mount(SupabasePanel, {
+      props: { policies: [], authUsers: [], authError: "" },
+    });
+    await w.find("input[placeholder='table']").setValue("todos");
+    await w.findAll("button").find((b) => b.text() === "Enable RLS")!.trigger("click");
+    expect(w.emitted("toggle-rls")).toEqual([["public", "todos", true]]);
+  });
+
+  it("emits drop-policy for a policy row", async () => {
+    const w = mount(SupabasePanel, {
+      props: { policies, authUsers: [], authError: "" },
+    });
+    await w.findAll("button").find((b) => b.text() === "Drop")!.trigger("click");
+    expect(w.emitted("drop-policy")).toEqual([[policies[0]]]);
+  });
+
+  it("shows the ddl error", () => {
+    const w = mount(SupabasePanel, {
+      props: { policies: [], authUsers: [], authError: "", ddlError: "syntax error at or near" },
+    });
+    expect(w.text()).toContain("syntax error at or near");
+  });
 });
