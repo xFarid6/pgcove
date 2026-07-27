@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tauri::Manager;
 
 use crate::connections::{self, ConnectionInfo, DbKind};
-use crate::db::{self, AuthUser, Db, PolicyDraft, PolicyInfo, TableInfo};
+use crate::db::{self, AuthUser, Db, PolicyDraft, PolicyInfo, TableInfo, TableStructure};
 use crate::supabase::{AdminUser, ProjectInfo, StorageBucket, SupabaseClient};
 
 fn store_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -90,6 +90,17 @@ pub async fn run_query(
 ) -> Result<serde_json::Value, String> {
     let pool = pool_for(&app, &connection_id).await?;
     db::run_query(&pool, &sql).await
+}
+
+#[tauri::command]
+pub async fn table_structure(
+    app: tauri::AppHandle,
+    connection_id: String,
+    schema: String,
+    table: String,
+) -> Result<TableStructure, String> {
+    let pool = pool_for(&app, &connection_id).await?;
+    db::table_structure(&pool, &schema, &table).await
 }
 
 #[tauri::command]

@@ -5,6 +5,7 @@ vi.mock("../api", () => ({
   listConnections: vi.fn(),
   listTables: vi.fn(),
   tableRows: vi.fn(),
+  tableStructure: vi.fn(),
   runQuery: vi.fn(),
   listPolicies: vi.fn(),
   listAuthUsers: vi.fn(),
@@ -112,7 +113,7 @@ describe("App", () => {
 
     expect(api.supabaseProjectInfo).toHaveBeenCalledWith("sb");
     expect(api.supabaseListUsers).toHaveBeenCalledWith("sb", 1, 50);
-    await w.findAll(".toolbar button")[2].trigger("click");
+    await w.findAll(".toolbar button")[3].trigger("click");
     expect(w.text()).toContain("abcdefgh");
     expect(w.text()).toContain("avatars");
     expect(w.text()).toContain("a@example.com");
@@ -144,7 +145,7 @@ describe("App", () => {
 
     // A failed self-check must not go on to ask for buckets with a bad key.
     expect(api.supabaseListBuckets).not.toHaveBeenCalled();
-    await w.findAll(".toolbar button")[2].trigger("click");
+    await w.findAll(".toolbar button")[3].trigger("click");
     expect(w.text()).toContain("401 Unauthorized");
   });
 
@@ -159,7 +160,7 @@ describe("App", () => {
       await flushPromises();
       await w.find(".connection-list button.name").trigger("click");
       await flushPromises();
-      await w.findAll(".toolbar button")[2].trigger("click");
+      await w.findAll(".toolbar button")[3].trigger("click");
       await w.find("input[placeholder='table']").setValue("todos");
       await w.find("input[placeholder='policy name']").setValue("own rows");
       return w;
@@ -204,6 +205,50 @@ describe("App", () => {
     });
   });
 
+  describe("table structure tab", () => {
+    beforeEach(() => {
+      vi.mocked(api.listPolicies).mockResolvedValue([]);
+      vi.mocked(api.listAuthUsers).mockResolvedValue([]);
+      vi.mocked(api.tableRows).mockResolvedValue([]);
+    });
+
+    it("loads structure on table select and shows it under the Structure tab", async () => {
+      vi.mocked(api.tableStructure).mockResolvedValue({
+        columns: [{ name: "id", dataType: "integer", nullable: false }],
+        indexes: [{ name: "todos_pkey", definition: "CREATE UNIQUE INDEX...", isUnique: true, isPrimary: true }],
+        constraints: [{ name: "todos_pkey", kind: "PRIMARY KEY", columns: "id" }],
+      });
+
+      const w = mount(App);
+      await flushPromises();
+      await w.find(".connection-list button.name").trigger("click");
+      await flushPromises();
+      await w.find(".table-list button").trigger("click");
+      await flushPromises();
+
+      expect(api.tableStructure).toHaveBeenCalledWith("c1", "main", "todos");
+      await w.findAll(".toolbar button")[1].trigger("click");
+      expect(w.text()).toContain("todos_pkey");
+      expect(w.text()).toContain("PRIMARY KEY");
+    });
+
+    it("shows the structure error when the read fails", async () => {
+      vi.mocked(api.tableStructure).mockRejectedValue(
+        new Error("table structure is a Postgres/Supabase feature"),
+      );
+
+      const w = mount(App);
+      await flushPromises();
+      await w.find(".connection-list button.name").trigger("click");
+      await flushPromises();
+      await w.find(".table-list button").trigger("click");
+      await flushPromises();
+      await w.findAll(".toolbar button")[1].trigger("click");
+
+      expect(w.text()).toContain("Postgres/Supabase feature");
+    });
+  });
+
   describe("admin user actions", () => {
     const sbConnection = {
       id: "sb",
@@ -237,7 +282,7 @@ describe("App", () => {
       await flushPromises();
       await w.find(".connection-list button.name").trigger("click");
       await flushPromises();
-      await w.findAll(".toolbar button")[2].trigger("click");
+      await w.findAll(".toolbar button")[3].trigger("click");
       return w;
     }
 

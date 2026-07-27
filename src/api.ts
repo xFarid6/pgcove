@@ -83,6 +83,34 @@ export interface StorageBucket {
 /** A table row as serialized by Postgres row_to_json. */
 export type Row = Record<string, unknown>;
 
+export interface ColumnInfo {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  default?: string;
+}
+
+export interface IndexInfo {
+  name: string;
+  definition: string;
+  isUnique: boolean;
+  isPrimary: boolean;
+}
+
+export interface ConstraintInfo {
+  name: string;
+  /** PRIMARY KEY | FOREIGN KEY | UNIQUE | CHECK */
+  kind: string;
+  columns: string;
+  foreignTable?: string;
+}
+
+export interface TableStructure {
+  columns: ColumnInfo[];
+  indexes: IndexInfo[];
+  constraints: ConstraintInfo[];
+}
+
 export const listConnections = () =>
   invoke<ConnectionInfo[]>("list_connections");
 
@@ -112,6 +140,9 @@ export const tableRows = (connectionId: string, schema: string, table: string) =
 /** Run a single SELECT-shaped statement; other statement kinds are a follow-up. */
 export const runQuery = (connectionId: string, sql: string) =>
   invoke<Row[]>("run_query", { connectionId, sql });
+
+export const tableStructure = (connectionId: string, schema: string, table: string) =>
+  invoke<TableStructure>("table_structure", { connectionId, schema, table });
 
 export const listPolicies = (connectionId: string) =>
   invoke<PolicyInfo[]>("list_policies", { connectionId });

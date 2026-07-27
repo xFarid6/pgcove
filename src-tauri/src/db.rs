@@ -485,6 +485,143 @@ pub async fn list_auth_users(db: &Db) -> Result<Vec<AuthUser>, String> {
         .collect()
 }
 
+/// A table's shape (issue #8) — columns, indexes, constraints. Postgres
+/// catalog-only, like `list_policies`/`list_auth_users`; SQLite's structure
+/// lives in a different catalog and is a separate follow-up if needed.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnInfo {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: bool,
+    pub default: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexInfo {
+    pub name: String,
+    pub definition: String,
+    pub is_unique: bool,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConstraintInfo {
+    pub name: String,
+    /// PRIMARY KEY | FOREIGN KEY | UNIQUE | CHECK
+    pub kind: String,
+    pub columns: String,
+    /// Target table for FOREIGN KEY constraints, e.g. "public.users".
+    pub foreign_table: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableStructure {
+    pub columns: Vec<ColumnInfo>,
+    pub indexes: Vec<IndexInfo>,
+    pub constraints: Vec<ConstraintInfo>,
+}
+
+pub async fn table_structure(db: &Db, schema: &str, table: &str) -> Result<TableStructure, String> {
+    let pool = match db {
+        Db::Postgres(pool) => pool,
+        Db::Sqlite(_) => return Err("table structure is a Postgres/Supabase feature".to_string()),
+    };
+
+    let column_rows = sqlx::query(
+        "SELECT column_name::text, data_type::text, (is_nullable = 'YES'), column_default::text
+         FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = $2
+         ORDER BY ordinal_position",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let columns = column_rows
+        .iter()
+        .map(|r| {
+            Ok(ColumnInfo {
+                name: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                data_type: r.try_get(1).map_err(|e: sqlx::Error| e.to_string())?,
+                nullable: r.try_get(2).map_err(|e: sqlx::Error| e.to_string())?,
+                default: r.try_get(3).map_err(|e: sqlx::Error| e.to_string())?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let index_rows = sqlx::query(
+        "SELECT i.relname::text, pg_get_indexdef(ix.indexrelid)::text, ix.indisunique, ix.indisprimary
+         FROM pg_index ix
+         JOIN pg_class t ON t.oid = ix.indrelid
+         JOIN pg_class i ON i.oid = ix.indexrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+         WHERE n.nspname = $1 AND t.relname = $2
+         ORDER BY i.relname",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let indexes = index_rows
+        .iter()
+        .map(|r| {
+            Ok(IndexInfo {
+                name: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                definition: r.try_get(1).map_err(|e: sqlx::Error| e.to_string())?,
+                is_unique: r.try_get(2).map_err(|e: sqlx::Error| e.to_string())?,
+                is_primary: r.try_get(3).map_err(|e: sqlx::Error| e.to_string())?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let constraint_rows = sqlx::query(
+        "SELECT tc.constraint_name::text, tc.constraint_type::text,
+                coalesce(string_agg(DISTINCT kcu.column_name, ', '), '')::text,
+                (SELECT confrelid::regclass::text
+                 FROM pg_constraint pc
+                 JOIN pg_class c ON c.oid = pc.conrelid
+                 JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE pc.conname = tc.constraint_name AND n.nspname = tc.table_schema
+                   AND c.relname = tc.table_name AND pc.contype = 'f')
+         FROM information_schema.table_constraints tc
+         LEFT JOIN information_schema.key_column_usage kcu
+           ON kcu.constraint_name = tc.constraint_name
+          AND kcu.table_schema = tc.table_schema
+          AND kcu.table_name = tc.table_name
+         WHERE tc.table_schema = $1 AND tc.table_name = $2
+         GROUP BY tc.constraint_name, tc.constraint_type, tc.table_schema, tc.table_name
+         ORDER BY tc.constraint_name",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let constraints = constraint_rows
+        .iter()
+        .map(|r| {
+            Ok(ConstraintInfo {
+                name: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                kind: r.try_get(1).map_err(|e: sqlx::Error| e.to_string())?,
+                columns: r.try_get(2).map_err(|e: sqlx::Error| e.to_string())?,
+                foreign_table: r.try_get(3).map_err(|e: sqlx::Error| e.to_string())?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    Ok(TableStructure {
+        columns,
+        indexes,
+        constraints,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,5 +810,14 @@ mod tests {
         let db = sqlite_memory().await;
         assert!(list_policies(&db).await.unwrap_err().contains("Postgres"));
         assert!(list_auth_users(&db).await.unwrap_err().contains("Postgres"));
+    }
+
+    #[tokio::test]
+    async fn sqlite_table_structure_is_postgres_only() {
+        let db = sqlite_memory().await;
+        assert!(table_structure(&db, "main", "todos")
+            .await
+            .unwrap_err()
+            .contains("Postgres"));
     }
 }

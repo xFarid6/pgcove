@@ -92,6 +92,67 @@ async fn creates_and_drops_an_rls_policy() {
 
 #[tokio::test]
 #[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn reads_table_structure() {
+    let p = pool().await;
+    let table = "pgcove_test_structure";
+
+    db::execute_ddl(&p, &format!("DROP TABLE IF EXISTS {table}"))
+        .await
+        .unwrap();
+    db::execute_ddl(
+        &p,
+        &format!(
+            "CREATE TABLE {table} (
+                id int PRIMARY KEY,
+                owner_id int REFERENCES {table} (id),
+                title text NOT NULL DEFAULT 'untitled'
+            )"
+        ),
+    )
+    .await
+    .unwrap();
+    db::execute_ddl(
+        &p,
+        &format!("CREATE UNIQUE INDEX {table}_title_idx ON {table} (title)"),
+    )
+    .await
+    .unwrap();
+
+    let structure = db::table_structure(&p, "public", table).await.unwrap();
+
+    assert_eq!(structure.columns.len(), 3);
+    let title = structure
+        .columns
+        .iter()
+        .find(|c| c.name == "title")
+        .unwrap();
+    assert!(!title.nullable);
+    assert_eq!(title.default.as_deref(), Some("'untitled'::text"));
+
+    assert!(structure
+        .indexes
+        .iter()
+        .any(|i| i.name == format!("{table}_title_idx") && i.is_unique));
+    assert!(structure.indexes.iter().any(|i| i.is_primary));
+
+    assert!(structure
+        .constraints
+        .iter()
+        .any(|c| c.kind == "PRIMARY KEY" && c.columns == "id"));
+    let fk = structure
+        .constraints
+        .iter()
+        .find(|c| c.kind == "FOREIGN KEY")
+        .unwrap();
+    assert_eq!(fk.foreign_table.as_deref(), Some(table));
+
+    db::execute_ddl(&p, &format!("DROP TABLE {table}"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
 async fn runs_arbitrary_select_query() {
     let p = pool().await;
     let rows = db::run_query(&p, "select 1 as n, 'hi' as s").await.unwrap();
