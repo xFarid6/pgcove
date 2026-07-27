@@ -13,6 +13,9 @@ vi.mock("../api", () => ({
   testConnection: vi.fn(),
   supabaseProjectInfo: vi.fn(),
   supabaseListBuckets: vi.fn(),
+  supabaseListUsers: vi.fn(),
+  supabaseBanUser: vi.fn(),
+  supabaseDeleteUser: vi.fn(),
   createPolicySql: vi.fn(),
   alterPolicySql: vi.fn(),
   dropPolicySql: vi.fn(),
@@ -98,6 +101,9 @@ describe("App", () => {
     vi.mocked(api.supabaseListBuckets).mockResolvedValue([
       { id: "avatars", name: "avatars", public: true, createdAt: "2026-01-02", updatedAt: "2026-01-02" },
     ]);
+    vi.mocked(api.supabaseListUsers).mockResolvedValue([
+      { id: "u1", email: "a@example.com", createdAt: "2026-01-01" },
+    ]);
 
     const w = mount(App);
     await flushPromises();
@@ -105,9 +111,11 @@ describe("App", () => {
     await flushPromises();
 
     expect(api.supabaseProjectInfo).toHaveBeenCalledWith("sb");
+    expect(api.supabaseListUsers).toHaveBeenCalledWith("sb", 1, 50);
     await w.findAll(".toolbar button")[2].trigger("click");
     expect(w.text()).toContain("abcdefgh");
     expect(w.text()).toContain("avatars");
+    expect(w.text()).toContain("a@example.com");
   });
 
   it("shows the project error and no buckets when the API call fails", async () => {
@@ -193,6 +201,85 @@ describe("App", () => {
       await flushPromises();
 
       expect(w.text()).toContain("permission denied");
+    });
+  });
+
+  describe("admin user actions", () => {
+    const sbConnection = {
+      id: "sb",
+      name: "supabase prod",
+      kind: "postgres" as const,
+      host: "db.abcdefgh.supabase.co",
+      port: 5432,
+      user: "postgres",
+      database: "postgres",
+      supabaseUrl: "https://abcdefgh.supabase.co",
+    };
+    const user = { id: "u1", email: "a@example.com", createdAt: "2026-01-01" };
+
+    beforeEach(() => {
+      vi.mocked(api.listConnections).mockResolvedValue([sbConnection]);
+      vi.mocked(api.listPolicies).mockResolvedValue([]);
+      vi.mocked(api.listAuthUsers).mockResolvedValue([]);
+      vi.mocked(api.supabaseProjectInfo).mockResolvedValue({
+        projectRef: "abcdefgh",
+        url: "https://abcdefgh.supabase.co",
+        title: "PostgREST API",
+        description: "standard public schema",
+        restVersion: "12.2.0",
+      });
+      vi.mocked(api.supabaseListBuckets).mockResolvedValue([]);
+      vi.mocked(api.supabaseListUsers).mockResolvedValue([user]);
+    });
+
+    async function openAdminUsers() {
+      const w = mount(App);
+      await flushPromises();
+      await w.find(".connection-list button.name").trigger("click");
+      await flushPromises();
+      await w.findAll(".toolbar button")[2].trigger("click");
+      return w;
+    }
+
+    it("loads the next page on load-users", async () => {
+      const w = await openAdminUsers();
+      await w.findAll("button").find((b) => b.text() === "Next")!.trigger("click");
+      expect(api.supabaseListUsers).toHaveBeenCalledWith("sb", 2, 50);
+    });
+
+    it("bans an active user after a duration prompt and refreshes the list", async () => {
+      window.prompt = vi.fn().mockReturnValue("24h");
+      const w = await openAdminUsers();
+      await w.findAll("button").find((b) => b.text() === "Ban")!.trigger("click");
+      await flushPromises();
+      expect(api.supabaseBanUser).toHaveBeenCalledWith("sb", "u1", "24h");
+      expect(api.supabaseListUsers).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not ban when the duration prompt is cancelled", async () => {
+      window.prompt = vi.fn().mockReturnValue(null);
+      const w = await openAdminUsers();
+      await w.findAll("button").find((b) => b.text() === "Ban")!.trigger("click");
+      await flushPromises();
+      expect(api.supabaseBanUser).not.toHaveBeenCalled();
+    });
+
+    it("deletes a user after confirmation and refreshes the list", async () => {
+      window.confirm = vi.fn().mockReturnValue(true);
+      const w = await openAdminUsers();
+      await w.findAll("button").find((b) => b.text() === "Delete")!.trigger("click");
+      await flushPromises();
+      expect(api.supabaseDeleteUser).toHaveBeenCalledWith("sb", "u1");
+      expect(api.supabaseListUsers).toHaveBeenCalledTimes(2);
+    });
+
+    it("shows the admin users error when a ban call fails", async () => {
+      window.prompt = vi.fn().mockReturnValue("24h");
+      vi.mocked(api.supabaseBanUser).mockRejectedValue(new Error("insufficient permissions"));
+      const w = await openAdminUsers();
+      await w.findAll("button").find((b) => b.text() === "Ban")!.trigger("click");
+      await flushPromises();
+      expect(w.text()).toContain("insufficient permissions");
     });
   });
 });

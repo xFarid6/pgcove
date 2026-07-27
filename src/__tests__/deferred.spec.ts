@@ -15,7 +15,9 @@ describe("deferred features", () => {
   // Issue #6 shipped: RLS policy create/alter/drop + RLS toggle form is
   // covered in components.spec.ts (SupabasePanel emits) and App.spec.ts
   // (confirm-then-execute-then-refresh wiring).
-  test.todo("auth users search/pagination/actions (issue #7)");
+  // Issue #7 shipped: admin-API search/pagination/ban/delete is covered in
+  // components.spec.ts (SupabasePanel emits) and App.spec.ts (load/ban/delete
+  // wiring). SQL fallback for pooler-only connections stays read-only.
   test.todo("table structure/DDL tab (issue #8)");
   test.todo("data grid pagination + sorting (issue #9)");
   test.todo("export results as CSV/JSON (issue #12)");

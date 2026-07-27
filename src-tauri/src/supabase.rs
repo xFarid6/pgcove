@@ -107,6 +107,34 @@ pub fn parse_buckets(body: &str) -> Result<Vec<StorageBucket>, String> {
     serde_json::from_str(body).map_err(|e| format!("unexpected /storage/v1/bucket response: {e}"))
 }
 
+/// A `GET /auth/v1/admin/users` row (issue #7). GoTrue's admin API has no
+/// documented server-side email filter, so search is done client-side over
+/// whatever page is loaded — see SupabasePanel.vue.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUser {
+    pub id: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default, alias = "created_at")]
+    pub created_at: String,
+    #[serde(default, alias = "banned_until")]
+    pub banned_until: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AdminUsersResponse {
+    #[serde(default)]
+    users: Vec<AdminUser>,
+}
+
+/// Parse `GET /auth/v1/admin/users`. Split out for the same testability reason.
+pub fn parse_admin_users(body: &str) -> Result<Vec<AdminUser>, String> {
+    let resp: AdminUsersResponse = serde_json::from_str(body)
+        .map_err(|e| format!("unexpected /auth/v1/admin/users response: {e}"))?;
+    Ok(resp.users)
+}
+
 /// Small HTTP client for one Supabase project. Not a generic API framework —
 /// just base URL + key + the two calls the panel needs.
 pub struct SupabaseClient {
@@ -157,6 +185,34 @@ impl SupabaseClient {
         Ok(body)
     }
 
+    /// PUT builder, same auth headers as `get`. Used for the admin ban call.
+    pub fn put(&self, path: &str) -> reqwest::RequestBuilder {
+        self.http
+            .put(format!("{}{path}", self.base_url))
+            .header("apikey", &self.service_key)
+            .bearer_auth(&self.service_key)
+    }
+
+    /// DELETE builder, same auth headers as `get`. Used for the admin delete call.
+    pub fn delete(&self, path: &str) -> reqwest::RequestBuilder {
+        self.http
+            .delete(format!("{}{path}", self.base_url))
+            .header("apikey", &self.service_key)
+            .bearer_auth(&self.service_key)
+    }
+
+    async fn check_status(resp: reqwest::Response) -> Result<(), String> {
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let body = resp.text().await.unwrap_or_default();
+        Err(format!(
+            "Supabase admin API returned {status}: {}",
+            body.trim()
+        ))
+    }
+
     /// Project self-check: the PostgREST OpenAPI root is the lightest
     /// endpoint a service-role key can reach on the project host.
     pub async fn project_info(&self) -> Result<ProjectInfo, String> {
@@ -166,6 +222,37 @@ impl SupabaseClient {
 
     pub async fn list_buckets(&self) -> Result<Vec<StorageBucket>, String> {
         parse_buckets(&self.get_text("/storage/v1/bucket").await?)
+    }
+
+    pub async fn list_users(&self, page: u32, per_page: u32) -> Result<Vec<AdminUser>, String> {
+        parse_admin_users(
+            &self
+                .get_text(&format!(
+                    "/auth/v1/admin/users?page={page}&per_page={per_page}"
+                ))
+                .await?,
+        )
+    }
+
+    /// `ban_duration` is a GoTrue duration string like `"24h"` or
+    /// `"876000h"` for effectively permanent; pass `"none"` to unban.
+    pub async fn ban_user(&self, user_id: &str, ban_duration: &str) -> Result<(), String> {
+        let resp = self
+            .put(&format!("/auth/v1/admin/users/{user_id}"))
+            .json(&serde_json::json!({ "ban_duration": ban_duration }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Self::check_status(resp).await
+    }
+
+    pub async fn delete_user(&self, user_id: &str) -> Result<(), String> {
+        let resp = self
+            .delete(&format!("/auth/v1/admin/users/{user_id}"))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        Self::check_status(resp).await
     }
 }
 
@@ -307,5 +394,53 @@ mod tests {
     #[test]
     fn empty_bucket_list_is_not_an_error() {
         assert_eq!(parse_buckets("[]").unwrap(), vec![]);
+    }
+
+    #[test]
+    fn parses_admin_users_response() {
+        let body = r#"{
+            "users": [
+                {"id": "u1", "email": "a@example.com", "created_at": "2026-01-02T00:00:00Z", "banned_until": null},
+                {"id": "u2", "email": "b@example.com", "created_at": "2026-01-03T00:00:00Z", "banned_until": "2099-01-01T00:00:00Z"}
+            ],
+            "aud": "authenticated"
+        }"#;
+        let users = parse_admin_users(body).unwrap();
+        assert_eq!(users.len(), 2);
+        assert_eq!(users[0].email, "a@example.com");
+        assert_eq!(users[0].banned_until, None);
+        assert_eq!(
+            users[1].banned_until.as_deref(),
+            Some("2099-01-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn empty_admin_users_list_is_not_an_error() {
+        assert_eq!(parse_admin_users(r#"{"users":[]}"#).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn admin_users_serialize_to_camel_case() {
+        let json = serde_json::to_value(AdminUser {
+            id: "u1".into(),
+            email: "a@example.com".into(),
+            created_at: "2026-01-02".into(),
+            banned_until: None,
+        })
+        .unwrap();
+        assert_eq!(json["createdAt"], "2026-01-02");
+        assert!(json["bannedUntil"].is_null());
+    }
+
+    #[test]
+    fn put_and_delete_carry_the_same_auth_headers_as_get() {
+        let client = SupabaseClient::new("https://abc.supabase.co", "service-key-123").unwrap();
+        let put_req = client.put("/auth/v1/admin/users/u1").build().unwrap();
+        assert_eq!(put_req.method(), reqwest::Method::PUT);
+        assert_eq!(put_req.headers()["apikey"], "service-key-123");
+        let del_req = client.delete("/auth/v1/admin/users/u1").build().unwrap();
+        assert_eq!(del_req.method(), reqwest::Method::DELETE);
+        assert_eq!(del_req.headers()["authorization"], "Bearer service-key-123");
     }
 }
