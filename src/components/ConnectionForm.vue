@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import type { ConnectionInfo, DbKind } from "../api";
+import { ref, watch } from "vue";
+import type { ConnectionInfo } from "../api";
 
 const emit = defineEmits<{
-  save: [info: ConnectionInfo, password: string | undefined];
+  save: [info: ConnectionInfo, password: string | undefined, serviceKey: string | undefined];
 }>();
 
-const kind = ref<DbKind>("postgres");
+/**
+ * UI-level variant, not the driver kind: a Supabase project still connects
+ * over Postgres, it just also carries a project URL + service-role key.
+ */
+type Variant = "supabase" | "postgres" | "sqlite";
+
+const variant = ref<Variant>("supabase");
 const name = ref("");
 const host = ref("localhost");
 const port = ref(5432);
@@ -14,10 +20,31 @@ const user = ref("postgres");
 const database = ref("postgres");
 const filePath = ref("");
 const password = ref("");
+const projectUrl = ref("");
+const serviceKey = ref("");
+
+/** `https://abcdefgh.supabase.co` -> `abcdefgh`; null for anything else. */
+function projectRefOf(url: string): string | null {
+  const hostname = url.trim().replace(/^https?:\/\//, "").split("/")[0];
+  const [first, ...rest] = hostname.split(".");
+  return first && rest.join(".") === "supabase.co" ? first : null;
+}
+
+// Typing the project URL fills in the direct database host Supabase gives
+// every project — still editable, since pooler hosts differ per region.
+watch(projectUrl, (url) => {
+  const projRef = projectRefOf(url);
+  if (!projRef) return;
+  host.value = `db.${projRef}.supabase.co`;
+  user.value = "postgres";
+  port.value = 5432;
+  database.value = "postgres";
+});
 
 function submit() {
-  if (kind.value === "sqlite") {
-    if (!name.value.trim() || !filePath.value.trim()) return;
+  if (!name.value.trim()) return;
+  if (variant.value === "sqlite") {
+    if (!filePath.value.trim()) return;
     emit("save", {
       id: crypto.randomUUID(),
       name: name.value.trim(),
@@ -26,12 +53,14 @@ function submit() {
       port: 0,
       user: "",
       database: filePath.value.trim(),
-    }, undefined);
+    }, undefined, undefined);
     name.value = "";
     filePath.value = "";
     return;
   }
-  if (!name.value.trim() || !host.value.trim()) return;
+  const isSupabase = variant.value === "supabase";
+  if (isSupabase && !projectUrl.value.trim()) return;
+  if (!host.value.trim()) return;
   emit(
     "save",
     {
@@ -42,11 +71,14 @@ function submit() {
       port: port.value,
       user: user.value.trim(),
       database: database.value.trim(),
+      ...(isSupabase ? { supabaseUrl: projectUrl.value.trim() } : {}),
     },
     password.value || undefined,
+    isSupabase ? serviceKey.value || undefined : undefined,
   );
   name.value = "";
   password.value = "";
+  serviceKey.value = "";
 }
 </script>
 
@@ -55,9 +87,12 @@ function submit() {
     class="connection-form"
     @submit.prevent="submit"
   >
-    <select v-model="kind">
+    <select v-model="variant">
+      <option value="supabase">
+        Supabase project
+      </option>
       <option value="postgres">
-        Postgres / Supabase
+        Postgres
       </option>
       <option value="sqlite">
         SQLite
@@ -67,13 +102,24 @@ function submit() {
       v-model="name"
       placeholder="Name (e.g. supabase prod)"
     >
-    <template v-if="kind === 'sqlite'">
+    <template v-if="variant === 'sqlite'">
       <input
         v-model="filePath"
         placeholder="File path (e.g. /home/me/app.db, or :memory:)"
       >
     </template>
     <template v-else>
+      <template v-if="variant === 'supabase'">
+        <input
+          v-model="projectUrl"
+          placeholder="Project URL (https://<ref>.supabase.co)"
+        >
+        <input
+          v-model="serviceKey"
+          type="password"
+          placeholder="Service-role key (stored in OS keyring)"
+        >
+      </template>
       <input
         v-model="host"
         placeholder="Host (…pooler.supabase.com)"

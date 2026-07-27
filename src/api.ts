@@ -14,6 +14,12 @@ export interface ConnectionInfo {
   port: number;
   user: string;
   database: string;
+  /**
+   * `https://<project-ref>.supabase.co` when this connection is a Supabase
+   * project — enables the Management/data API calls below. The matching
+   * service-role key is passed to saveConnection and kept in the OS keyring.
+   */
+  supabaseUrl?: string;
 }
 
 export interface TableInfo {
@@ -38,14 +44,39 @@ export interface AuthUser {
   createdAt: string;
 }
 
+export interface SupabaseProjectInfo {
+  /** Empty for self-hosted/custom-domain projects. */
+  projectRef: string;
+  url: string;
+  title: string;
+  description: string;
+  restVersion: string;
+}
+
+export interface StorageBucket {
+  id: string;
+  name: string;
+  public: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A table row as serialized by Postgres row_to_json. */
 export type Row = Record<string, unknown>;
 
 export const listConnections = () =>
   invoke<ConnectionInfo[]>("list_connections");
 
-export const saveConnection = (info: ConnectionInfo, password?: string) =>
-  invoke<void>("save_connection", { info, password: password ?? null });
+export const saveConnection = (
+  info: ConnectionInfo,
+  password?: string,
+  serviceKey?: string,
+) =>
+  invoke<void>("save_connection", {
+    info,
+    password: password ?? null,
+    serviceKey: serviceKey ?? null,
+  });
 
 export const deleteConnection = (id: string) =>
   invoke<void>("delete_connection", { id });
@@ -68,3 +99,10 @@ export const listPolicies = (connectionId: string) =>
 
 export const listAuthUsers = (connectionId: string) =>
   invoke<AuthUser[]>("list_auth_users", { connectionId });
+
+/** Supabase project self-check over HTTP; needs `supabaseUrl` + service key. */
+export const supabaseProjectInfo = (connectionId: string) =>
+  invoke<SupabaseProjectInfo>("supabase_project_info", { connectionId });
+
+export const supabaseListBuckets = (connectionId: string) =>
+  invoke<StorageBucket[]>("supabase_list_buckets", { connectionId });
