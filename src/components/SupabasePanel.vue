@@ -2,10 +2,17 @@
 // Supabase-first panel: project info and storage buckets over the project's
 // HTTP API (issue #5), plus RLS policies (from the real pg_policies catalog,
 // editable per issue #6) and auth.users over SQL (user admin is issue #7).
-import { ref } from "vue";
-import type { AuthUser, PolicyDraft, PolicyInfo, StorageBucket, SupabaseProjectInfo } from "../api";
+import { computed, ref } from "vue";
+import type {
+  AdminUser,
+  AuthUser,
+  PolicyDraft,
+  PolicyInfo,
+  StorageBucket,
+  SupabaseProjectInfo,
+} from "../api";
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     policies: PolicyInfo[];
     authUsers: AuthUser[];
@@ -18,8 +25,20 @@ withDefaults(
     projectError?: string;
     /** Error from the most recent policy/RLS DDL attempt, if any. */
     ddlError?: string;
+    /** Loaded via the Management/admin API — search/ban/delete capable. */
+    adminUsers?: AdminUser[];
+    adminUsersError?: string;
+    adminPage?: number;
   }>(),
-  { projectInfo: null, buckets: () => [], projectError: "", ddlError: "" },
+  {
+    projectInfo: null,
+    buckets: () => [],
+    projectError: "",
+    ddlError: "",
+    adminUsers: () => [],
+    adminUsersError: "",
+    adminPage: 1,
+  },
 );
 
 const emit = defineEmits<{
@@ -27,7 +46,16 @@ const emit = defineEmits<{
   "alter-policy": [draft: PolicyDraft];
   "drop-policy": [policy: PolicyInfo];
   "toggle-rls": [schema: string, table: string, enable: boolean];
+  "load-users": [page: number];
+  "ban-user": [user: AdminUser];
+  "delete-user": [user: AdminUser];
 }>();
+
+const emailFilter = ref("");
+const filteredAdminUsers = computed(() => {
+  const q = emailFilter.value.trim().toLowerCase();
+  return q ? props.adminUsers.filter((u) => u.email.toLowerCase().includes(q)) : props.adminUsers;
+});
 
 const schema = ref("public");
 const table = ref("");
@@ -258,39 +286,114 @@ function toggleRls(enable: boolean) {
     </section>
     <section>
       <h2>Auth users</h2>
-      <p
-        v-if="authError"
-        class="empty"
-      >
-        {{ authError }}
-      </p>
-      <table v-else-if="authUsers.length > 0">
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>ID</th>
-            <th>Created</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="u in authUsers"
-            :key="u.id"
+      <template v-if="projectInfo">
+        <div class="row">
+          <input
+            v-model="emailFilter"
+            placeholder="filter by email (loaded page only)"
           >
-            <td>{{ u.email }}</td>
-            <td class="expr">
-              {{ u.id }}
-            </td>
-            <td>{{ u.createdAt }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p
-        v-else
-        class="empty"
-      >
-        No auth users.
-      </p>
+          <button
+            type="button"
+            :disabled="adminPage <= 1"
+            @click="emit('load-users', adminPage - 1)"
+          >
+            Prev
+          </button>
+          <span>Page {{ adminPage }}</span>
+          <button
+            type="button"
+            @click="emit('load-users', adminPage + 1)"
+          >
+            Next
+          </button>
+        </div>
+        <p
+          v-if="adminUsersError"
+          class="error"
+        >
+          {{ adminUsersError }}
+        </p>
+        <table v-if="filteredAdminUsers.length > 0">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Created</th>
+              <th>Status</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="u in filteredAdminUsers"
+              :key="u.id"
+            >
+              <td>{{ u.email }}</td>
+              <td>{{ u.createdAt }}</td>
+              <td>{{ u.bannedUntil ? `banned until ${u.bannedUntil}` : "active" }}</td>
+              <td>
+                <button
+                  type="button"
+                  @click="emit('ban-user', u)"
+                >
+                  {{ u.bannedUntil ? "Unban" : "Ban" }}
+                </button>
+                <button
+                  type="button"
+                  @click="emit('delete-user', u)"
+                >
+                  Delete
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p
+          v-else
+          class="empty"
+        >
+          No admin users loaded.
+        </p>
+      </template>
+      <template v-else>
+        <p
+          v-if="authError"
+          class="empty"
+        >
+          {{ authError }}
+        </p>
+        <template v-else-if="authUsers.length > 0">
+          <p class="empty">
+            Read-only — connect a Supabase project URL + service-role key for search, ban and delete.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>ID</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="u in authUsers"
+                :key="u.id"
+              >
+                <td>{{ u.email }}</td>
+                <td class="expr">
+                  {{ u.id }}
+                </td>
+                <td>{{ u.createdAt }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+        <p
+          v-else
+          class="empty"
+        >
+          No auth users.
+        </p>
+      </template>
     </section>
   </div>
 </template>

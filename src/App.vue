@@ -13,10 +13,14 @@ import {
   rlsSql,
   runQuery,
   saveConnection,
+  supabaseBanUser,
+  supabaseDeleteUser,
   supabaseListBuckets,
+  supabaseListUsers,
   supabaseProjectInfo,
   tableRows,
   testConnection,
+  type AdminUser,
   type AuthUser,
   type ConnectionInfo,
   type PolicyDraft,
@@ -44,6 +48,9 @@ const authError = ref("");
 const projectInfo = ref<SupabaseProjectInfo | null>(null);
 const buckets = ref<StorageBucket[]>([]);
 const projectError = ref("");
+const adminUsers = ref<AdminUser[]>([]);
+const adminUsersError = ref("");
+const adminPage = ref(1);
 const tab = ref<"data" | "query" | "supabase">("data");
 const status = ref("");
 const error = ref("");
@@ -90,6 +97,9 @@ async function refreshSupabaseProject(id: string) {
   projectInfo.value = null;
   buckets.value = [];
   projectError.value = "";
+  adminUsers.value = [];
+  adminUsersError.value = "";
+  adminPage.value = 1;
   if (!connections.value.find((c) => c.id === id)?.supabaseUrl) return;
   try {
     projectInfo.value = await supabaseProjectInfo(id);
@@ -101,6 +111,49 @@ async function refreshSupabaseProject(id: string) {
     buckets.value = await supabaseListBuckets(id);
   } catch {
     buckets.value = [];
+  }
+  await loadAdminUsers(1);
+}
+
+/** Search is client-side over the loaded page — see SupabasePanel.vue. */
+async function loadAdminUsers(page: number) {
+  if (!activeId.value || page < 1) return;
+  adminPage.value = page;
+  try {
+    adminUsers.value = await supabaseListUsers(activeId.value, page, 50);
+    adminUsersError.value = "";
+  } catch (e) {
+    adminUsers.value = [];
+    adminUsersError.value = String(e);
+  }
+}
+
+async function onBanUser(u: AdminUser) {
+  if (!activeId.value) return;
+  const duration = u.bannedUntil
+    ? window.confirm(`Unban ${u.email}?`)
+      ? "none"
+      : null
+    : window.prompt(`Ban duration for ${u.email} (e.g. 24h, 876000h for permanent):`, "24h");
+  if (!duration) return;
+  try {
+    await supabaseBanUser(activeId.value, u.id, duration);
+    adminUsersError.value = "";
+    await loadAdminUsers(adminPage.value);
+  } catch (e) {
+    adminUsersError.value = String(e);
+  }
+}
+
+async function onDeleteUser(u: AdminUser) {
+  if (!activeId.value) return;
+  if (!window.confirm(`Permanently delete ${u.email}? This cannot be undone.`)) return;
+  try {
+    await supabaseDeleteUser(activeId.value, u.id);
+    adminUsersError.value = "";
+    await loadAdminUsers(adminPage.value);
+  } catch (e) {
+    adminUsersError.value = String(e);
   }
 }
 
@@ -265,10 +318,16 @@ onMounted(refreshConnections);
           :buckets="buckets"
           :project-error="projectError"
           :ddl-error="ddlError"
+          :admin-users="adminUsers"
+          :admin-users-error="adminUsersError"
+          :admin-page="adminPage"
           @create-policy="onCreatePolicy"
           @alter-policy="onAlterPolicy"
           @drop-policy="onDropPolicy"
           @toggle-rls="onToggleRls"
+          @load-users="loadAdminUsers"
+          @ban-user="onBanUser"
+          @delete-user="onDeleteUser"
         />
       </template>
       <p

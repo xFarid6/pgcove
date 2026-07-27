@@ -55,6 +55,14 @@ export interface AuthUser {
   createdAt: string;
 }
 
+/** A GoTrue admin user row (issue #7) — search/ban/delete via the Management API. */
+export interface AdminUser {
+  id: string;
+  email: string;
+  createdAt: string;
+  bannedUntil?: string;
+}
+
 export interface SupabaseProjectInfo {
   /** Empty for self-hosted/custom-domain projects. */
   projectRef: string;
@@ -134,3 +142,13 @@ export const supabaseProjectInfo = (connectionId: string) =>
 
 export const supabaseListBuckets = (connectionId: string) =>
   invoke<StorageBucket[]>("supabase_list_buckets", { connectionId });
+
+export const supabaseListUsers = (connectionId: string, page: number, perPage: number) =>
+  invoke<AdminUser[]>("supabase_list_users", { connectionId, page, perPage });
+
+/** `banDuration` is a GoTrue duration string, e.g. "24h"; pass "none" to unban. */
+export const supabaseBanUser = (connectionId: string, userId: string, banDuration: string) =>
+  invoke<void>("supabase_ban_user", { connectionId, userId, banDuration });
+
+export const supabaseDeleteUser = (connectionId: string, userId: string) =>
+  invoke<void>("supabase_delete_user", { connectionId, userId });

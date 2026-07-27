@@ -348,4 +348,63 @@ describe("SupabasePanel", () => {
     });
     expect(w.text()).toContain("syntax error at or near");
   });
+
+  it("marks the SQL auth-users fallback as read-only when there is no project", () => {
+    const w = mount(SupabasePanel, {
+      props: {
+        policies: [],
+        authUsers: [{ id: "u1", email: "a@b.c", createdAt: "2026-01-01" }],
+        authError: "",
+      },
+    });
+    expect(w.text()).toContain("Read-only");
+  });
+
+  const projectInfo = {
+    projectRef: "abcdefgh",
+    url: "https://abcdefgh.supabase.co",
+    title: "PostgREST API",
+    description: "standard public schema",
+    restVersion: "12.2.0",
+  };
+
+  it("renders admin users and filters them by email client-side", async () => {
+    const w = mount(SupabasePanel, {
+      props: {
+        policies: [],
+        authUsers: [],
+        authError: "",
+        projectInfo,
+        adminUsers: [
+          { id: "u1", email: "a@example.com", createdAt: "2026-01-01" },
+          { id: "u2", email: "b@example.com", createdAt: "2026-01-02", bannedUntil: "2099-01-01" },
+        ],
+      },
+    });
+    expect(w.text()).toContain("a@example.com");
+    expect(w.text()).toContain("banned until 2099-01-01");
+    await w.find("input[placeholder^='filter by email']").setValue("a@");
+    expect(w.text()).toContain("a@example.com");
+    expect(w.text()).not.toContain("b@example.com");
+  });
+
+  it("emits load-users for prev/next", async () => {
+    const w = mount(SupabasePanel, {
+      props: { policies: [], authUsers: [], authError: "", projectInfo, adminPage: 2 },
+    });
+    await w.findAll("button").find((b) => b.text() === "Next")!.trigger("click");
+    await w.findAll("button").find((b) => b.text() === "Prev")!.trigger("click");
+    expect(w.emitted("load-users")).toEqual([[3], [1]]);
+  });
+
+  it("emits ban-user and delete-user for an admin user row", async () => {
+    const user = { id: "u1", email: "a@example.com", createdAt: "2026-01-01" };
+    const w = mount(SupabasePanel, {
+      props: { policies: [], authUsers: [], authError: "", projectInfo, adminUsers: [user] },
+    });
+    await w.findAll("button").find((b) => b.text() === "Ban")!.trigger("click");
+    await w.findAll("button").find((b) => b.text() === "Delete")!.trigger("click");
+    expect(w.emitted("ban-user")).toEqual([[user]]);
+    expect(w.emitted("delete-user")).toEqual([[user]]);
+  });
 });

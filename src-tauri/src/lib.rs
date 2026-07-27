@@ -24,6 +24,9 @@ pub fn run() {
             commands::list_auth_users,
             commands::supabase_project_info,
             commands::supabase_list_buckets,
+            commands::supabase_list_users,
+            commands::supabase_ban_user,
+            commands::supabase_delete_user,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

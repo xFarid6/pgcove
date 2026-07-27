@@ -5,7 +5,7 @@ use tauri::Manager;
 
 use crate::connections::{self, ConnectionInfo, DbKind};
 use crate::db::{self, AuthUser, Db, PolicyDraft, PolicyInfo, TableInfo};
-use crate::supabase::{ProjectInfo, StorageBucket, SupabaseClient};
+use crate::supabase::{AdminUser, ProjectInfo, StorageBucket, SupabaseClient};
 
 fn store_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
@@ -158,4 +158,41 @@ pub async fn supabase_list_buckets(
     connection_id: String,
 ) -> Result<Vec<StorageBucket>, String> {
     supabase_for(&app, &connection_id)?.list_buckets().await
+}
+
+/// Admin user listing over the Management/data-plane auth API (issue #7).
+#[tauri::command]
+pub async fn supabase_list_users(
+    app: tauri::AppHandle,
+    connection_id: String,
+    page: u32,
+    per_page: u32,
+) -> Result<Vec<AdminUser>, String> {
+    supabase_for(&app, &connection_id)?
+        .list_users(page, per_page)
+        .await
+}
+
+/// `ban_duration` is a GoTrue duration string, e.g. `"24h"`; pass `"none"` to unban.
+#[tauri::command]
+pub async fn supabase_ban_user(
+    app: tauri::AppHandle,
+    connection_id: String,
+    user_id: String,
+    ban_duration: String,
+) -> Result<(), String> {
+    supabase_for(&app, &connection_id)?
+        .ban_user(&user_id, &ban_duration)
+        .await
+}
+
+#[tauri::command]
+pub async fn supabase_delete_user(
+    app: tauri::AppHandle,
+    connection_id: String,
+    user_id: String,
+) -> Result<(), String> {
+    supabase_for(&app, &connection_id)?
+        .delete_user(&user_id)
+        .await
 }
