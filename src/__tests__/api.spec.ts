@@ -5,7 +5,14 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 
-import { listTables, runQuery, saveConnection, tableRows } from "../api";
+import {
+  listTables,
+  runQuery,
+  saveConnection,
+  supabaseListBuckets,
+  supabaseProjectInfo,
+  tableRows,
+} from "../api";
 
 describe("api wrappers", () => {
   beforeEach(() => invoke.mockReset());
@@ -23,6 +30,37 @@ describe("api wrappers", () => {
     expect(invoke).toHaveBeenCalledWith("save_connection", {
       info,
       password: null,
+      serviceKey: null,
+    });
+  });
+
+  it("save_connection passes the Supabase service key when given", async () => {
+    const info = {
+      id: "1",
+      name: "supabase prod",
+      host: "db.abcdefgh.supabase.co",
+      port: 5432,
+      user: "postgres",
+      database: "postgres",
+      supabaseUrl: "https://abcdefgh.supabase.co",
+    };
+    await saveConnection(info, "dbpass", "sk-service");
+    expect(invoke).toHaveBeenCalledWith("save_connection", {
+      info,
+      password: "dbpass",
+      serviceKey: "sk-service",
+    });
+  });
+
+  it("supabase_project_info and supabase_list_buckets pass the connection id", async () => {
+    invoke.mockResolvedValue([]);
+    await supabaseProjectInfo("c1");
+    expect(invoke).toHaveBeenCalledWith("supabase_project_info", {
+      connectionId: "c1",
+    });
+    await supabaseListBuckets("c1");
+    expect(invoke).toHaveBeenCalledWith("supabase_list_buckets", {
+      connectionId: "c1",
     });
   });
 

@@ -11,6 +11,8 @@ vi.mock("../api", () => ({
   saveConnection: vi.fn(),
   deleteConnection: vi.fn(),
   testConnection: vi.fn(),
+  supabaseProjectInfo: vi.fn(),
+  supabaseListBuckets: vi.fn(),
 }));
 
 import * as api from "../api";
@@ -18,6 +20,7 @@ import App from "../App.vue";
 
 describe("App", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(api.listConnections).mockResolvedValue([
       {
         id: "c1",
@@ -50,5 +53,85 @@ describe("App", () => {
 
     expect(w.text()).toContain("todos");
     expect(w.find(".error").exists()).toBe(false);
+  });
+
+  it("skips the Supabase project calls for a connection without a project URL", async () => {
+    vi.mocked(api.listPolicies).mockResolvedValue([]);
+    vi.mocked(api.listAuthUsers).mockResolvedValue([]);
+
+    const w = mount(App);
+    await flushPromises();
+    await w.find(".connection-list button.name").trigger("click");
+    await flushPromises();
+
+    expect(api.supabaseProjectInfo).not.toHaveBeenCalled();
+    expect(api.supabaseListBuckets).not.toHaveBeenCalled();
+  });
+
+  it("loads project info and buckets for a Supabase connection", async () => {
+    vi.mocked(api.listConnections).mockResolvedValue([
+      {
+        id: "sb",
+        name: "supabase prod",
+        kind: "postgres",
+        host: "db.abcdefgh.supabase.co",
+        port: 5432,
+        user: "postgres",
+        database: "postgres",
+        supabaseUrl: "https://abcdefgh.supabase.co",
+      },
+    ]);
+    vi.mocked(api.listPolicies).mockResolvedValue([]);
+    vi.mocked(api.listAuthUsers).mockResolvedValue([]);
+    vi.mocked(api.supabaseProjectInfo).mockResolvedValue({
+      projectRef: "abcdefgh",
+      url: "https://abcdefgh.supabase.co",
+      title: "PostgREST API",
+      description: "standard public schema",
+      restVersion: "12.2.0",
+    });
+    vi.mocked(api.supabaseListBuckets).mockResolvedValue([
+      { id: "avatars", name: "avatars", public: true, createdAt: "2026-01-02", updatedAt: "2026-01-02" },
+    ]);
+
+    const w = mount(App);
+    await flushPromises();
+    await w.find(".connection-list button.name").trigger("click");
+    await flushPromises();
+
+    expect(api.supabaseProjectInfo).toHaveBeenCalledWith("sb");
+    await w.findAll(".toolbar button")[2].trigger("click");
+    expect(w.text()).toContain("abcdefgh");
+    expect(w.text()).toContain("avatars");
+  });
+
+  it("shows the project error and no buckets when the API call fails", async () => {
+    vi.mocked(api.listConnections).mockResolvedValue([
+      {
+        id: "sb",
+        name: "supabase prod",
+        kind: "postgres",
+        host: "db.abcdefgh.supabase.co",
+        port: 5432,
+        user: "postgres",
+        database: "postgres",
+        supabaseUrl: "https://abcdefgh.supabase.co",
+      },
+    ]);
+    vi.mocked(api.listPolicies).mockResolvedValue([]);
+    vi.mocked(api.listAuthUsers).mockResolvedValue([]);
+    vi.mocked(api.supabaseProjectInfo).mockRejectedValue(
+      new Error("Supabase /rest/v1/ returned 401 Unauthorized"),
+    );
+
+    const w = mount(App);
+    await flushPromises();
+    await w.find(".connection-list button.name").trigger("click");
+    await flushPromises();
+
+    // A failed self-check must not go on to ask for buckets with a bad key.
+    expect(api.supabaseListBuckets).not.toHaveBeenCalled();
+    await w.findAll(".toolbar button")[2].trigger("click");
+    expect(w.text()).toContain("401 Unauthorized");
   });
 });

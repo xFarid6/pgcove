@@ -7,7 +7,11 @@ describe("deferred features", () => {
   test.todo("in-grid cell editing with type-aware inputs (issue #2)");
   test.todo("MySQL connection form variant (issue #3)");
   test.todo("SQLite native file-picker dialog (issue #4 follow-up — text path input ships now)");
-  test.todo("Supabase Management API project panel (issue #5)");
+  // Issue #5 shipped: the project/storage sections of SupabasePanel and the
+  // Supabase connection form variant are covered in components.spec.ts,
+  // api.spec.ts and App.spec.ts. Only the edge-function half is still out of
+  // reach — it needs a management access token, not the service-role key.
+  test.todo("Supabase edge function list (fast-follow to #5 — needs a management access token)");
   test.todo("RLS policy create/edit dialog (issue #6)");
   test.todo("auth users search/pagination/actions (issue #7)");
   test.todo("table structure/DDL tab (issue #8)");
