@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod connections;
 pub mod db;
+pub mod supabase;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,6 +17,8 @@ pub fn run() {
             commands::run_query,
             commands::list_policies,
             commands::list_auth_users,
+            commands::supabase_project_info,
+            commands::supabase_list_buckets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

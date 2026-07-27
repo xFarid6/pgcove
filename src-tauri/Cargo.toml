@@ -23,6 +23,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # rustls TLS so Supabase (which requires TLS) works with zero native deps.
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "sqlite", "json"] }
+# Supabase HTTP APIs (issue #5). rustls here too — no native-tls/OpenSSL.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset"] }
 tokio = { version = "1", features = ["macros"] }
 # Same keyring setup as proxmox-desktop / dockshell.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

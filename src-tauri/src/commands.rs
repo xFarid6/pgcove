@@ -5,6 +5,7 @@ use tauri::Manager;
 
 use crate::connections::{self, ConnectionInfo, DbKind};
 use crate::db::{self, AuthUser, Db, PolicyInfo, TableInfo};
+use crate::supabase::{ProjectInfo, StorageBucket, SupabaseClient};
 
 fn store_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
@@ -21,6 +22,19 @@ async fn pool_for(app: &tauri::AppHandle, id: &str) -> Result<Db, String> {
     db::connect(info.kind, &db::connection_url(&info, &password)).await
 }
 
+/// Same shape as `pool_for`, for the Supabase HTTP APIs: project URL from the
+/// saved connection, service-role key from the keyring.
+fn supabase_for(app: &tauri::AppHandle, id: &str) -> Result<SupabaseClient, String> {
+    let info = connections::get(&store_dir(app)?, id)?;
+    let url = info
+        .supabase_url
+        .filter(|u| !u.trim().is_empty())
+        .ok_or_else(|| "this connection is not a Supabase project".to_string())?;
+    let key = connections::get_service_key(id)
+        .map_err(|e| format!("no service-role key saved for this connection ({e})"))?;
+    SupabaseClient::new(&url, &key)
+}
+
 #[tauri::command]
 pub fn list_connections(app: tauri::AppHandle) -> Result<Vec<ConnectionInfo>, String> {
     connections::load(&store_dir(&app)?)
@@ -31,8 +45,9 @@ pub fn save_connection(
     app: tauri::AppHandle,
     info: ConnectionInfo,
     password: Option<String>,
+    service_key: Option<String>,
 ) -> Result<(), String> {
-    connections::save(&store_dir(&app)?, info, password)
+    connections::save(&store_dir(&app)?, info, password, service_key)
 }
 
 #[tauri::command]
@@ -93,4 +108,22 @@ pub async fn list_auth_users(
 ) -> Result<Vec<AuthUser>, String> {
     let pool = pool_for(&app, &connection_id).await?;
     db::list_auth_users(&pool).await
+}
+
+/// Project self-check over HTTP — reachability plus the PostgREST version,
+/// which is the most a service-role key can tell us about the project itself.
+#[tauri::command]
+pub async fn supabase_project_info(
+    app: tauri::AppHandle,
+    connection_id: String,
+) -> Result<ProjectInfo, String> {
+    supabase_for(&app, &connection_id)?.project_info().await
+}
+
+#[tauri::command]
+pub async fn supabase_list_buckets(
+    app: tauri::AppHandle,
+    connection_id: String,
+) -> Result<Vec<StorageBucket>, String> {
+    supabase_for(&app, &connection_id)?.list_buckets().await
 }
