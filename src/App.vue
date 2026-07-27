@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import {
   alterPolicySql,
+  applyPendingMigrations,
   createPolicySql,
   deleteConnection,
   dropPolicySql,
@@ -10,6 +11,7 @@ import {
   listConnections,
   listPolicies,
   listTables,
+  migrationStatus,
   rlsSql,
   runQuery,
   saveConnection,
@@ -24,6 +26,7 @@ import {
   type AdminUser,
   type AuthUser,
   type ConnectionInfo,
+  type MigrationInfo,
   type PolicyDraft,
   type PolicyInfo,
   type Row,
@@ -35,6 +38,7 @@ import {
 import ConnectionForm from "./components/ConnectionForm.vue";
 import ConnectionList from "./components/ConnectionList.vue";
 import DataGrid from "./components/DataGrid.vue";
+import MigrationsPanel from "./components/MigrationsPanel.vue";
 import QueryEditor from "./components/QueryEditor.vue";
 import SupabasePanel from "./components/SupabasePanel.vue";
 import TableList from "./components/TableList.vue";
@@ -62,7 +66,10 @@ const projectError = ref("");
 const adminUsers = ref<AdminUser[]>([]);
 const adminUsersError = ref("");
 const adminPage = ref(1);
-const tab = ref<"data" | "structure" | "query" | "supabase">("data");
+const migrations = ref<MigrationInfo[]>([]);
+const migrationsError = ref("");
+const migrationsRunning = ref(false);
+const tab = ref<"data" | "structure" | "query" | "supabase" | "migrations">("data");
 const status = ref("");
 const error = ref("");
 const queryRows = ref<Row[]>([]);
@@ -245,6 +252,31 @@ async function onRunQuery(sql: string) {
   }
 }
 
+async function onRefreshMigrations(folder: string, table: string) {
+  if (!activeId.value) return;
+  try {
+    migrations.value = await migrationStatus(activeId.value, folder, table || undefined);
+    migrationsError.value = "";
+  } catch (e) {
+    migrations.value = [];
+    migrationsError.value = String(e);
+  }
+}
+
+async function onRunMigrations(folder: string, table: string) {
+  if (!activeId.value) return;
+  migrationsRunning.value = true;
+  try {
+    await applyPendingMigrations(activeId.value, folder, table || undefined);
+    migrationsError.value = "";
+    await onRefreshMigrations(folder, table);
+  } catch (e) {
+    migrationsError.value = String(e);
+  } finally {
+    migrationsRunning.value = false;
+  }
+}
+
 /** Preview a DDL statement, let the user confirm it, then run + refresh policies. */
 async function runConfirmedDdl(sqlPromise: Promise<string>, refreshPolicies = true) {
   if (!activeId.value) return;
@@ -345,6 +377,12 @@ onMounted(refreshConnections);
           Supabase
         </button>
         <button
+          :class="{ active: tab === 'migrations' }"
+          @click="tab = 'migrations'"
+        >
+          Migrations
+        </button>
+        <button
           :disabled="!activeId"
           @click="onTest"
         >
@@ -403,7 +441,7 @@ onMounted(refreshConnections);
           <DataGrid :rows="queryRows" />
         </template>
         <SupabasePanel
-          v-else
+          v-else-if="tab === 'supabase'"
           :policies="policies"
           :auth-users="authUsers"
           :auth-error="authError"
@@ -421,6 +459,14 @@ onMounted(refreshConnections);
           @load-users="loadAdminUsers"
           @ban-user="onBanUser"
           @delete-user="onDeleteUser"
+        />
+        <MigrationsPanel
+          v-else
+          :migrations="migrations"
+          :error="migrationsError"
+          :running="migrationsRunning"
+          @refresh="onRefreshMigrations"
+          @run="onRunMigrations"
         />
       </template>
       <p

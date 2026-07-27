@@ -24,5 +24,9 @@ describe("deferred features", () => {
   // Issue #9 shipped: paging/sorting/filtering is covered in
   // components.spec.ts (DataGrid emits) and App.spec.ts (state threading +
   // reload-on-change wiring).
+  // Issue #10 shipped: the Migrations tab (status + run pending) is covered
+  // in components.spec.ts (MigrationsPanel emits) and App.spec.ts (load/run
+  // wiring). Folder picking is a text path input, same call as issue #4's
+  // SQLite path field — no native file-picker dialog dependency added.
   test.todo("export results as CSV/JSON (issue #12)");
 });

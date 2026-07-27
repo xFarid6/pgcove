@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod connections;
 pub mod db;
+pub mod migrations;
 pub mod supabase;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -23,6 +24,8 @@ pub fn run() {
             commands::rls_sql,
             commands::execute_ddl,
             commands::list_auth_users,
+            commands::migration_status,
+            commands::apply_pending_migrations,
             commands::supabase_project_info,
             commands::supabase_list_buckets,
             commands::supabase_list_users,

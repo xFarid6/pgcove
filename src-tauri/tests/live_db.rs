@@ -9,6 +9,7 @@
 use pgcove_lib::connections::DbKind;
 use pgcove_lib::db;
 use pgcove_lib::db::RowsQuery;
+use pgcove_lib::migrations;
 
 fn default_rows_query() -> RowsQuery {
     RowsQuery {
@@ -296,6 +297,67 @@ async fn run_query_returns_empty_array_for_zero_rows() {
         .await
         .unwrap();
     assert_eq!(rows, serde_json::json!([]));
+}
+
+#[tokio::test]
+#[ignore = "requires a reachable Postgres — set PGCOVE_TEST_URL"]
+async fn applies_pending_migrations_and_records_them() {
+    let p = pool().await;
+    let table = "pgcove_test_schema_migrations";
+    let migrated_table = "pgcove_test_migrated_table";
+
+    db::execute_ddl(&p, &format!("DROP TABLE IF EXISTS {table}"))
+        .await
+        .unwrap();
+    db::execute_ddl(&p, &format!("DROP TABLE IF EXISTS {migrated_table}"))
+        .await
+        .unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("1_create_table.sql"),
+        format!("CREATE TABLE {migrated_table} (id int);"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("2_add_column.sql"),
+        format!("ALTER TABLE {migrated_table} ADD COLUMN name text;"),
+    )
+    .unwrap();
+
+    let before = migrations::migration_status(&p, dir.path(), Some(table))
+        .await
+        .unwrap();
+    assert_eq!(before.len(), 2);
+    assert!(before.iter().all(|m| !m.applied));
+
+    let ran = migrations::apply_pending(&p, dir.path(), Some(table))
+        .await
+        .unwrap();
+    assert_eq!(ran, vec!["1".to_string(), "2".to_string()]);
+
+    let after = migrations::migration_status(&p, dir.path(), Some(table))
+        .await
+        .unwrap();
+    assert!(after.iter().all(|m| m.applied));
+
+    // Idempotent: re-running finds nothing pending left to apply.
+    let ran_again = migrations::apply_pending(&p, dir.path(), Some(table))
+        .await
+        .unwrap();
+    assert!(ran_again.is_empty());
+
+    let structure = db::table_structure(&p, "public", migrated_table)
+        .await
+        .unwrap();
+    assert_eq!(structure.columns.len(), 2);
+
+    db::execute_ddl(&p, &format!("DROP TABLE {migrated_table}"))
+        .await
+        .unwrap();
+    db::execute_ddl(&p, &format!("DROP TABLE {table}"))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

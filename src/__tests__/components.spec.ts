@@ -3,10 +3,11 @@ import { mount } from "@vue/test-utils";
 import ConnectionForm from "../components/ConnectionForm.vue";
 import ConnectionList from "../components/ConnectionList.vue";
 import DataGrid from "../components/DataGrid.vue";
+import MigrationsPanel from "../components/MigrationsPanel.vue";
 import QueryEditor from "../components/QueryEditor.vue";
 import SupabasePanel from "../components/SupabasePanel.vue";
 import TableList from "../components/TableList.vue";
-import type { ConnectionInfo, PolicyInfo, TableInfo } from "../api";
+import type { ConnectionInfo, MigrationInfo, PolicyInfo, TableInfo } from "../api";
 
 const conns: ConnectionInfo[] = [
   {
@@ -445,5 +446,47 @@ describe("SupabasePanel", () => {
     await w.findAll("button").find((b) => b.text() === "Delete")!.trigger("click");
     expect(w.emitted("ban-user")).toEqual([[user]]);
     expect(w.emitted("delete-user")).toEqual([[user]]);
+  });
+});
+
+describe("MigrationsPanel", () => {
+  const migrations: MigrationInfo[] = [
+    { version: "1", name: "create_users", applied: true },
+    { version: "2", name: "add_index", applied: false },
+  ];
+
+  it("renders migrations with status", () => {
+    const w = mount(MigrationsPanel, { props: { migrations } });
+    expect(w.text()).toContain("create_users");
+    expect(w.text()).toContain("applied");
+    expect(w.text()).toContain("pending");
+  });
+
+  it("shows an empty state with no migrations loaded", () => {
+    const w = mount(MigrationsPanel, { props: { migrations: [] } });
+    expect(w.text()).toContain("No migrations loaded");
+  });
+
+  it("emits refresh with the folder and table fields", async () => {
+    const w = mount(MigrationsPanel, { props: { migrations: [] } });
+    await w.find("input[placeholder^='Migrations folder']").setValue("/tmp/migrations");
+    await w.find("input[placeholder^='Tracking table']").setValue("my_migrations");
+    await w.find("button").trigger("click");
+    expect(w.emitted("refresh")).toEqual([["/tmp/migrations", "my_migrations"]]);
+  });
+
+  it("disables run when there is nothing pending, enables it otherwise", async () => {
+    const allApplied = migrations.map((m) => ({ ...m, applied: true }));
+    const w = mount(MigrationsPanel, { props: { migrations: allApplied } });
+    await w.find("input[placeholder^='Migrations folder']").setValue("/tmp/migrations");
+    const runButton = w.findAll("button").find((b) => b.text().startsWith("Run pending"))!;
+    expect(runButton.attributes("disabled")).toBeDefined();
+
+    const w2 = mount(MigrationsPanel, { props: { migrations } });
+    await w2.find("input[placeholder^='Migrations folder']").setValue("/tmp/migrations");
+    const runButton2 = w2.findAll("button").find((b) => b.text().startsWith("Run pending"))!;
+    expect(runButton2.attributes("disabled")).toBeUndefined();
+    await runButton2.trigger("click");
+    expect(w2.emitted("run")).toEqual([["/tmp/migrations", ""]]);
   });
 });

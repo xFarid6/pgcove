@@ -22,6 +22,8 @@ vi.mock("../api", () => ({
   dropPolicySql: vi.fn(),
   rlsSql: vi.fn(),
   executeDdl: vi.fn(),
+  migrationStatus: vi.fn(),
+  applyPendingMigrations: vi.fn(),
 }));
 
 import * as api from "../api";
@@ -405,6 +407,72 @@ describe("App", () => {
       await w.findAll("button").find((b) => b.text() === "Ban")!.trigger("click");
       await flushPromises();
       expect(w.text()).toContain("insufficient permissions");
+    });
+  });
+
+  describe("migrations tab", () => {
+    beforeEach(() => {
+      vi.mocked(api.listPolicies).mockResolvedValue([]);
+      vi.mocked(api.listAuthUsers).mockResolvedValue([]);
+    });
+
+    async function openMigrationsTab() {
+      const w = mount(App);
+      await flushPromises();
+      await w.find(".connection-list button.name").trigger("click");
+      await flushPromises();
+      await w.findAll(".toolbar button")[4].trigger("click");
+      return w;
+    }
+
+    it("loads migration status for the entered folder", async () => {
+      vi.mocked(api.migrationStatus).mockResolvedValue([
+        { version: "1", name: "create_users", applied: true },
+        { version: "2", name: "add_index", applied: false },
+      ]);
+
+      const w = await openMigrationsTab();
+      await w.find("input[placeholder^='Migrations folder']").setValue("/tmp/migrations");
+      await w.find(".migrations-panel button").trigger("click");
+      await flushPromises();
+
+      expect(api.migrationStatus).toHaveBeenCalledWith("c1", "/tmp/migrations", undefined);
+      expect(w.text()).toContain("create_users");
+      expect(w.text()).toContain("add_index");
+    });
+
+    it("shows the error when loading migration status fails", async () => {
+      vi.mocked(api.migrationStatus).mockRejectedValue(new Error("relation does not exist"));
+
+      const w = await openMigrationsTab();
+      await w.find("input[placeholder^='Migrations folder']").setValue("/tmp/migrations");
+      await w.find(".migrations-panel button").trigger("click");
+      await flushPromises();
+
+      expect(w.text()).toContain("relation does not exist");
+    });
+
+    it("runs pending migrations then reloads status", async () => {
+      vi.mocked(api.migrationStatus).mockResolvedValueOnce([
+        { version: "1", name: "create_users", applied: false },
+      ]);
+      vi.mocked(api.applyPendingMigrations).mockResolvedValue(["1"]);
+      vi.mocked(api.migrationStatus).mockResolvedValueOnce([
+        { version: "1", name: "create_users", applied: true },
+      ]);
+
+      const w = await openMigrationsTab();
+      await w.find("input[placeholder^='Migrations folder']").setValue("/tmp/migrations");
+      await w.find(".migrations-panel button").trigger("click");
+      await flushPromises();
+
+      const runButton = w.findAll("button").find((b) => b.text().startsWith("Run pending"))!;
+      await runButton.trigger("click");
+      await flushPromises();
+
+      expect(api.applyPendingMigrations).toHaveBeenCalledWith("c1", "/tmp/migrations", undefined);
+      expect(api.migrationStatus).toHaveBeenCalledTimes(2);
+      expect(w.text()).toContain("applied");
     });
   });
 });

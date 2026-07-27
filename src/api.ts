@@ -182,6 +182,25 @@ export const executeDdl = (connectionId: string, sql: string) =>
 export const listAuthUsers = (connectionId: string) =>
   invoke<AuthUser[]>("list_auth_users", { connectionId });
 
+/** One local migration file, matched against the tracking table by version. */
+export interface MigrationInfo {
+  version: string;
+  name: string;
+  applied: boolean;
+}
+
+/**
+ * `table` overrides tracking-table detection (defaults to
+ * `supabase_migrations.schema_migrations` when present, else
+ * `public.schema_migrations`, created on first `applyPendingMigrations`).
+ */
+export const migrationStatus = (connectionId: string, folder: string, table?: string) =>
+  invoke<MigrationInfo[]>("migration_status", { connectionId, folder, table: table || null });
+
+/** Runs pending `.sql` files in `folder` order; returns the versions applied. */
+export const applyPendingMigrations = (connectionId: string, folder: string, table?: string) =>
+  invoke<string[]>("apply_pending_migrations", { connectionId, folder, table: table || null });
+
 /** Supabase project self-check over HTTP; needs `supabaseUrl` + service key. */
 export const supabaseProjectInfo = (connectionId: string) =>
   invoke<SupabaseProjectInfo>("supabase_project_info", { connectionId });
