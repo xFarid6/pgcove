@@ -53,7 +53,7 @@ async fn pool_for(app: &tauri::AppHandle, id: &str) -> Result<Db, String> {
     // keyring for them, so looking one up would just error.
     let password = match info.kind {
         DbKind::Sqlite => String::new(),
-        DbKind::Postgres => connections::get_password(id)?,
+        DbKind::Postgres | DbKind::MySql => connections::get_password(id)?,
     };
     let mut effective = info.clone();
     if info.ssh_tunnel.is_some() {

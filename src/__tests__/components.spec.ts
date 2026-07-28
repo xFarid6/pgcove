@@ -172,6 +172,29 @@ describe("ConnectionForm", () => {
   });
 });
 
+describe("ConnectionForm", () => {
+  it("defaults the port to postgres's before an engine is picked", () => {
+    const w = mount(ConnectionForm);
+    expect((w.find("input[type=number]").element as HTMLInputElement).valueAsNumber).toBe(5432);
+  });
+
+  it("switches the default port when the engine changes to mysql", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("select").setValue("mysql");
+    expect((w.find("input[type=number]").element as HTMLInputElement).valueAsNumber).toBe(3306);
+  });
+
+  it("emits save with the selected engine kind", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("select").setValue("mysql");
+    await w.find("input[placeholder^='Name']").setValue("my mysql box");
+    await w.find("form").trigger("submit");
+    const [[info]] = w.emitted("save") as [[ConnectionInfo, string | undefined]];
+    expect(info.kind).toBe("mysql");
+    expect(info.port).toBe(3306);
+  });
+});
+
 const tables: TableInfo[] = [
   { schema: "public", name: "todos", kind: "BASE TABLE" },
   { schema: "public", name: "todo_view", kind: "VIEW" },

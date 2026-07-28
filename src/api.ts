@@ -2,7 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-export type DbKind = "postgres" | "sqlite";
+export type DbKind = "postgres" | "sqlite" | "mysql";
 
 /**
  * SSH tunnel (issue #11): `host`/`port` on `ConnectionInfo` stay the DB's
@@ -21,7 +21,7 @@ export interface SshTunnelConfig {
 export interface ConnectionInfo {
   id: string;
   name: string;
-  /** Defaults to "postgres" server-side if omitted. */
+  /** Defaults to "postgres" server-side if omitted (pre-SQLite/MySQL saves). */
   kind?: DbKind;
   /** Ignored for "sqlite" — only `database` (the file path, or ":memory:") is used. */
   host: string;

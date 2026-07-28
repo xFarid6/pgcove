@@ -16,6 +16,7 @@ pub enum DbKind {
     #[default]
     Postgres,
     Sqlite,
+    MySql,
 }
 
 /// One saved connection = one database. For Supabase the SQL side is still
@@ -33,7 +34,7 @@ pub struct ConnectionInfo {
     pub id: String,
     pub name: String,
     /// Defaults to Postgres so existing `connections.json` entries (written
-    /// before SQLite support existed) still deserialize.
+    /// before SQLite/MySQL support existed) still deserialize.
     #[serde(default)]
     pub kind: DbKind,
     pub host: String,
@@ -225,6 +226,14 @@ mod tests {
 
         delete(dir.path(), "a").unwrap();
         assert!(get(dir.path(), "a").is_err());
+    }
+
+    #[test]
+    fn missing_kind_defaults_to_postgres() {
+        // connections.json written before MySQL support existed has no `kind`.
+        let old_json = r#"[{"id":"a","name":"db a","host":"localhost","port":5432,"user":"postgres","database":"postgres"}]"#;
+        let conns: Vec<ConnectionInfo> = serde_json::from_str(old_json).unwrap();
+        assert_eq!(conns[0].kind, DbKind::Postgres);
     }
 
     #[test]

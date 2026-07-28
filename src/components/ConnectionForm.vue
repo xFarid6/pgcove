@@ -15,12 +15,14 @@ const emit = defineEmits<{
  * UI-level variant, not the driver kind: a Supabase project still connects
  * over Postgres, it just also carries a project URL + service-role key.
  */
-type Variant = "supabase" | "postgres" | "sqlite";
+type Variant = "supabase" | "postgres" | "mysql" | "sqlite";
 
 const variant = ref<Variant>("supabase");
+const DEFAULT_PORTS: Record<"postgres" | "mysql", number> = { postgres: 5432, mysql: 3306 };
+
 const name = ref("");
 const host = ref("localhost");
-const port = ref(5432);
+const port = ref(DEFAULT_PORTS.postgres);
 const user = ref("postgres");
 const database = ref("postgres");
 const filePath = ref("");
@@ -81,6 +83,15 @@ function resetSshFields() {
   sshSecret.value = "";
 }
 
+// Only follow the engine's default port while the field still holds *a*
+// default — once the user types their own port, stop overwriting it.
+function onVariantChange() {
+  if (variant.value !== "postgres" && variant.value !== "mysql") return;
+  if (Object.values(DEFAULT_PORTS).includes(port.value)) {
+    port.value = DEFAULT_PORTS[variant.value];
+  }
+}
+
 function submit() {
   if (!name.value.trim()) return;
   const sshTunnel = variant.value === "sqlite" ? undefined : sshTunnelConfig();
@@ -107,7 +118,7 @@ function submit() {
     {
       id: crypto.randomUUID(),
       name: name.value.trim(),
-      kind: "postgres",
+      kind: isSupabase ? "postgres" : (variant.value as "postgres" | "mysql"),
       host: host.value.trim(),
       port: port.value,
       user: user.value.trim(),
@@ -131,12 +142,18 @@ function submit() {
     class="connection-form"
     @submit.prevent="submit"
   >
-    <select v-model="variant">
+    <select
+      v-model="variant"
+      @change="onVariantChange"
+    >
       <option value="supabase">
         Supabase project
       </option>
       <option value="postgres">
-        Postgres
+        PostgreSQL
+      </option>
+      <option value="mysql">
+        MySQL
       </option>
       <option value="sqlite">
         SQLite
