@@ -3,6 +3,10 @@
 import { describe, test } from "vitest";
 
 describe("deferred features", () => {
+  // Issue #13 shipped: app settings (theme + query defaults) theme toggle
+  // and query defaults (row limit, statement timeout) are covered in
+  // App.spec.ts (loadSettings/saveSettings + applyTheme wiring) and the
+  // Rust settings.rs tests (roundtrip, defaults).
   test.todo("query editor syntax highlighting (issue #1 follow-up)");
   test.todo("SQLite native file-picker dialog (issue #4 follow-up — text path input ships now)");
   // Issue #5 shipped: the project/storage sections of SupabasePanel and the

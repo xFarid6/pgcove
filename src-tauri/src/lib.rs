@@ -3,6 +3,7 @@ pub mod connections;
 pub mod db;
 pub mod known_hosts;
 pub mod migrations;
+pub mod settings;
 pub mod ssh_tunnel;
 pub mod supabase;
 
@@ -36,6 +37,9 @@ pub fn run() {
             commands::supabase_list_users,
             commands::supabase_ban_user,
             commands::supabase_delete_user,
+            commands::supabase_list_edge_functions,
+            commands::load_settings,
+            commands::save_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

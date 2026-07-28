@@ -24,6 +24,8 @@ vi.mock("../api", () => ({
   executeDdl: vi.fn(),
   migrationStatus: vi.fn(),
   applyPendingMigrations: vi.fn(),
+  loadSettings: vi.fn(),
+  saveSettings: vi.fn(),
 }));
 
 import * as api from "../api";
@@ -46,6 +48,12 @@ describe("App", () => {
     vi.mocked(api.listTables).mockResolvedValue([
       { schema: "main", name: "todos", kind: "BASE TABLE" },
     ]);
+    vi.mocked(api.loadSettings).mockResolvedValue({
+      theme: "dark",
+      defaultRowLimit: 50,
+      defaultStatementTimeout: 30,
+    });
+    vi.mocked(api.saveSettings).mockResolvedValue(undefined);
   });
 
   it("keeps the tables list when policies/auth users error, as a SQLite connection always does", async () => {

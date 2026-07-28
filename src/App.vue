@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   alterPolicySql,
   applyPendingMigrations,
@@ -11,11 +11,13 @@ import {
   listConnections,
   listPolicies,
   listTables,
+  loadSettings,
   migrationStatus,
   primaryKeyColumns,
   rlsSql,
   runQuery,
   saveConnection,
+  saveSettings,
   supabaseBanUser,
   supabaseDeleteUser,
   supabaseListBuckets,
@@ -26,6 +28,7 @@ import {
   testConnection,
   updateCell,
   type AdminUser,
+  type AppSettings,
   type AuthUser,
   type ConnectionInfo,
   type MigrationInfo,
@@ -42,6 +45,7 @@ import ConnectionList from "./components/ConnectionList.vue";
 import DataGrid from "./components/DataGrid.vue";
 import MigrationsPanel from "./components/MigrationsPanel.vue";
 import QueryEditorTabs from "./components/QueryEditorTabs.vue";
+import SettingsDialog from "./components/SettingsDialog.vue";
 import SupabasePanel from "./components/SupabasePanel.vue";
 import TableList from "./components/TableList.vue";
 
@@ -51,7 +55,13 @@ const tables = ref<TableInfo[]>([]);
 const activeTable = ref<TableInfo | null>(null);
 const rows = ref<Row[]>([]);
 const rowsPage = ref(1);
-const rowsPageSize = 50;
+const settings = ref<AppSettings>({
+  theme: "dark",
+  defaultRowLimit: 50,
+  defaultStatementTimeout: 30,
+});
+const rowsPageSize = computed(() => settings.value.defaultRowLimit);
+const showSettingsDialog = ref(false);
 const rowsApproxTotal = ref(0);
 const sortColumn = ref("");
 const sortDesc = ref(false);
@@ -206,7 +216,7 @@ async function loadRows() {
   try {
     const page = await tableRows(activeId.value, activeTable.value.schema, activeTable.value.name, {
       page: rowsPage.value,
-      pageSize: rowsPageSize,
+      pageSize: rowsPageSize.value,
       orderBy: sortColumn.value || undefined,
       orderDesc: sortDesc.value,
       filterColumn: filterColumn.value || undefined,
@@ -364,7 +374,36 @@ async function onTest() {
   }
 }
 
-onMounted(refreshConnections);
+function applyTheme(theme: "light" | "dark" | "system") {
+  const root = document.documentElement;
+  if (theme === "system") {
+    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", isDark ? "dark" : "light");
+  } else {
+    root.setAttribute("data-theme", theme);
+  }
+}
+
+async function updateSettings(updates: Partial<AppSettings>) {
+  const updated = { ...settings.value, ...updates };
+  settings.value = updated;
+  try {
+    await saveSettings(updated);
+    if ("theme" in updates) applyTheme(updated.theme);
+  } catch (e) {
+    console.error("Failed to save settings:", e);
+  }
+}
+
+onMounted(async () => {
+  try {
+    settings.value = await loadSettings();
+    applyTheme(settings.value.theme);
+  } catch (e) {
+    console.error("Failed to load settings:", e);
+  }
+  await refreshConnections();
+});
 </script>
 
 <template>
@@ -427,6 +466,9 @@ onMounted(refreshConnections);
         >
           Test connection
         </button>
+        <button @click="showSettingsDialog = true">
+          Settings
+        </button>
         <span
           v-if="status"
           class="status"
@@ -436,6 +478,12 @@ onMounted(refreshConnections);
           class="error"
         >{{ error }}</span>
       </div>
+      <SettingsDialog
+        v-if="showSettingsDialog"
+        :settings="settings"
+        @update="updateSettings"
+        @close="showSettingsDialog = false"
+      />
       <template v-if="activeId">
         <template v-if="tab === 'data'">
           <p
@@ -532,38 +580,70 @@ onMounted(refreshConnections);
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 15px;
-  color: #e8e8e8;
-  background-color: #1c2024;
+
+  /* Dark theme (default) */
+  --text-color: #e8e8e8;
+  --bg-color: #1c2024;
+  --button-bg: #2b3138;
+  --accent-color: #34a06f;
+  --border-color: #3a414b;
+  --input-bg: #252a30;
 }
+
+:root[data-theme="light"] {
+  --text-color: #1a1a1a;
+  --bg-color: #f5f5f5;
+  --button-bg: #e8e8e8;
+  --accent-color: #2d7a4a;
+  --border-color: #d0d0d0;
+  --input-bg: #ffffff;
+}
+
+:root[data-theme="dark"] {
+  --text-color: #e8e8e8;
+  --bg-color: #1c2024;
+  --button-bg: #2b3138;
+  --accent-color: #34a06f;
+  --border-color: #3a414b;
+  --input-bg: #252a30;
+}
+
 body {
   margin: 0;
+  color: var(--text-color);
+  background-color: var(--bg-color);
 }
+
 button {
   border-radius: 6px;
   border: 1px solid transparent;
   padding: 0.4em 0.9em;
   font-family: inherit;
-  color: inherit;
-  background-color: #2b3138;
+  color: var(--text-color);
+  background-color: var(--button-bg);
   cursor: pointer;
 }
+
 button:hover:not(:disabled) {
-  border-color: #34a06f;
+  border-color: var(--accent-color);
 }
+
 button.active {
-  border-color: #34a06f;
+  border-color: var(--accent-color);
 }
+
 button:disabled {
   opacity: 0.45;
   cursor: default;
 }
-input {
+
+input, textarea, select {
   border-radius: 6px;
-  border: 1px solid #3a414b;
+  border: 1px solid var(--border-color);
   padding: 0.4em 0.6em;
   font-family: inherit;
-  color: inherit;
-  background-color: #252a30;
+  color: var(--text-color);
+  background-color: var(--input-bg);
 }
 </style>
 
@@ -572,43 +652,56 @@ input {
   display: flex;
   height: 100vh;
 }
+
 .sidebar {
   width: 280px;
   border-right: 1px solid rgba(128, 128, 128, 0.25);
   overflow-y: auto;
   padding: 0.5rem;
+  background-color: var(--bg-color);
+  color: var(--text-color);
 }
+
 .sidebar h1 {
   font-size: 1.1rem;
   margin: 0.3rem 0.5rem 0.8rem;
 }
+
 .sidebar h2 {
   font-size: 0.85rem;
   margin: 0.8rem 0.5rem 0.3rem;
   text-transform: uppercase;
   opacity: 0.7;
 }
+
 .main {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background-color: var(--bg-color);
+  color: var(--text-color);
 }
+
 .toolbar {
   display: flex;
   gap: 0.5rem;
   align-items: center;
   padding: 0.5rem;
   flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-color);
 }
+
 .status {
   font-size: 0.8rem;
   opacity: 0.8;
 }
+
 .error {
   color: #ff6b6b;
   font-size: 0.85rem;
 }
+
 .hint {
   padding: 1rem;
   opacity: 0.7;
