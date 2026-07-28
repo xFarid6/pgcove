@@ -43,6 +43,7 @@ import {
 import ConnectionForm from "./components/ConnectionForm.vue";
 import ConnectionList from "./components/ConnectionList.vue";
 import DataGrid from "./components/DataGrid.vue";
+import ErdView from "./components/ErdView.vue";
 import MigrationsPanel from "./components/MigrationsPanel.vue";
 import QueryEditorTabs from "./components/QueryEditorTabs.vue";
 import QueryHistoryPanel from "./components/QueryHistoryPanel.vue";
@@ -84,7 +85,9 @@ const adminPage = ref(1);
 const migrations = ref<MigrationInfo[]>([]);
 const migrationsError = ref("");
 const migrationsRunning = ref(false);
-const tab = ref<"data" | "structure" | "query" | "supabase" | "migrations" | "schema-diff">("data");
+const tab = ref<
+  "data" | "structure" | "query" | "erd" | "supabase" | "migrations" | "schema-diff"
+>("data");
 const status = ref("");
 const error = ref("");
 const editError = ref("");
@@ -472,6 +475,13 @@ onMounted(async () => {
           Structure
         </button>
         <button
+          :class="{ active: tab === 'erd' }"
+          :disabled="!activeId"
+          @click="tab = 'erd'"
+        >
+          ERD
+        </button>
+        <button
           :class="{ active: tab === 'query' }"
           @click="tab = 'query'"
         >
@@ -563,6 +573,12 @@ onMounted(async () => {
             <h2>Constraints</h2>
             <DataGrid :rows="structure?.constraints ?? []" />
           </template>
+        </template>
+        <template v-else-if="tab === 'erd'">
+          <ErdView
+            :connection-id="activeId ?? ''"
+            :schema="activeTable?.schema ?? 'public'"
+          />
         </template>
         <template v-else-if="tab === 'query'">
           <div class="query-tab-container">

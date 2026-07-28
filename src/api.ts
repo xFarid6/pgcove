@@ -152,6 +152,23 @@ export interface TableStructure {
   constraints: ConstraintInfo[];
 }
 
+export interface ForeignKey {
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+}
+
+export interface ErdTable {
+  schema: string;
+  name: string;
+}
+
+export interface ErdData {
+  tables: ErdTable[];
+  foreignKeys: ForeignKey[];
+}
+
 export interface SchemaDiffTable {
   schema: string;
   table: string;
@@ -230,6 +247,9 @@ export const runQuery = (connectionId: string, sql: string) =>
 
 export const tableStructure = (connectionId: string, schema: string, table: string) =>
   invoke<TableStructure>("table_structure", { connectionId, schema, table });
+
+export const erdData = (connectionId: string, schema: string) =>
+  invoke<ErdData>("erd_data", { connectionId, schema });
 
 export const schemaDiff = (leftConnectionId: string, rightConnectionId: string) =>
   invoke<SchemaDiff>("schema_diff", { leftConnectionId, rightConnectionId });
