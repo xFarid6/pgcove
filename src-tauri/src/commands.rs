@@ -119,6 +119,13 @@ pub async fn test_connection(app: tauri::AppHandle, id: String) -> Result<String
     db::server_version(&pool).await
 }
 
+/// Health check (ping) — on-demand connection reachability test (issue #33).
+#[tauri::command]
+pub async fn ping_connection(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let pool = pool_for(&app, &id).await?;
+    db::ping(&pool).await
+}
+
 #[tauri::command]
 pub async fn list_tables(
     app: tauri::AppHandle,

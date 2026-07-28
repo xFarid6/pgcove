@@ -123,6 +123,35 @@ pub async fn server_version(db: &Db) -> Result<String, String> {
     }
 }
 
+/// Lightweight health check: execute the cheapest no-op query per driver
+/// with a 5s timeout. Returns Ok(()) if the connection is responsive.
+pub async fn ping(db: &Db) -> Result<(), String> {
+    let timeout = std::time::Duration::from_secs(5);
+    match db {
+        Db::Postgres(pool) => {
+            tokio::time::timeout(timeout, sqlx::query("SELECT 1").fetch_one(pool))
+                .await
+                .map_err(|_| "connection timeout".to_string())?
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Db::Sqlite(pool) => {
+            tokio::time::timeout(timeout, sqlx::query("SELECT 1").fetch_one(pool))
+                .await
+                .map_err(|_| "connection timeout".to_string())?
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Db::MySql(pool) => {
+            tokio::time::timeout(timeout, sqlx::query("SELECT 1").fetch_one(pool))
+                .await
+                .map_err(|_| "connection timeout".to_string())?
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+    }
+}
+
 /// Convert one SQLite row to a JSON object, keyed by column name. SQLite is
 /// dynamically typed per-value, so decoding is tried integer, then float,
 /// then text, then blob (hex-encoded), falling through to `null` — which is
@@ -1453,5 +1482,11 @@ mod tests {
         let db = Db::MySql(pool);
         let err = run_query(&db, "select 1").await.unwrap_err();
         assert!(err.contains("MySQL"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn sqlite_ping_succeeds() {
+        let db = sqlite_memory().await;
+        ping(&db).await.expect("ping should succeed");
     }
 }
