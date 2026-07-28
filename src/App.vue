@@ -292,6 +292,21 @@ async function onEditCell(rowIndex: number, column: string, value: string) {
   }
 }
 
+async function onUndoEdit(rowIndex: number, column: string, oldValue: unknown) {
+  if (!activeId.value || !activeTable.value) return;
+  const row = rows.value[rowIndex];
+  const pk: Record<string, string | null> = {};
+  for (const c of pkColumns.value) pk[c] = toText(row[c]);
+  const oldValueStr = toText(oldValue);
+  try {
+    await updateCell(activeId.value, activeTable.value.schema, activeTable.value.name, pk, column, oldValueStr);
+    rows.value[rowIndex] = { ...row, [column]: oldValue };
+    editError.value = "";
+  } catch (e) {
+    editError.value = String(e);
+  }
+}
+
 async function onImportRows() {
   // Refresh the rows after successful import
   if (activeTable.value) {
@@ -522,6 +537,7 @@ onMounted(async () => {
             @page="onRowsPage"
             @filter="onRowsFilter"
             @edit="onEditCell"
+            @undo="onUndoEdit"
             @import="onImportRows"
           />
         </template>

@@ -43,6 +43,7 @@ const emit = defineEmits<{
   page: [page: number];
   filter: [column: string, value: string];
   edit: [rowIndex: number, column: string, value: string];
+  undo: [rowIndex: number, column: string, oldValue: unknown];
   import: [];
 }>();
 
@@ -101,6 +102,15 @@ async function handleImport() {
 const editing = ref<{ row: number; col: string } | null>(null);
 const editValue = ref("");
 
+interface UndoEntry {
+  rowIndex: number;
+  column: string;
+  oldValue: unknown;
+}
+
+const undoStack = ref<UndoEntry[]>([]);
+const maxUndoSize = 50;
+
 function startEdit(rowIndex: number, col: string, current: unknown) {
   if (!canEdit.value) return;
   editing.value = { row: rowIndex, col };
@@ -110,6 +120,13 @@ function startEdit(rowIndex: number, col: string, current: unknown) {
 function commitEdit() {
   if (!editing.value) return;
   const { row, col } = editing.value;
+  const oldValue = props.rows[row][col];
+
+  undoStack.value.push({ rowIndex: row, column: col, oldValue });
+  if (undoStack.value.length > maxUndoSize) {
+    undoStack.value.shift();
+  }
+
   emit("edit", row, col, editValue.value);
   editing.value = null;
 }
@@ -117,10 +134,21 @@ function commitEdit() {
 function cancelEdit() {
   editing.value = null;
 }
+
+function handleUndo() {
+  const entry = undoStack.value.pop();
+  if (!entry) return;
+  emit("undo", entry.rowIndex, entry.column, entry.oldValue);
+}
 </script>
 
 <template>
-  <div class="data-grid">
+  <div
+    tabindex="0"
+    class="data-grid"
+    @keydown.ctrl.z.prevent="handleUndo"
+    @keydown.meta.z.prevent="handleUndo"
+  >
     <div
       v-if="pageable"
       class="controls"
@@ -179,6 +207,14 @@ function cancelEdit() {
           @click="exportJson"
         >
           Export JSON
+        </button>
+        <button
+          type="button"
+          title="Undo last edit (Ctrl+Z)"
+          :disabled="undoStack.length === 0"
+          @click="handleUndo"
+        >
+          Undo
         </button>
       </div>
       <button
@@ -243,6 +279,7 @@ function cancelEdit() {
 .data-grid {
   overflow: auto;
   flex: 1;
+  outline: none;
 }
 .controls,
 .export-controls {
