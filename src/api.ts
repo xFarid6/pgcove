@@ -279,6 +279,23 @@ export const loadSettings = () =>
 export const saveSettings = (settings: AppSettings) =>
   invoke<void>("save_settings", { settings });
 
+/** A query record in the execution history. */
+export interface QueryRecord {
+  id: string;
+  sql: string;
+  connectionId: string;
+  timestamp: string;
+}
+
+export const listQueryHistory = () =>
+  invoke<QueryRecord[]>("list_query_history");
+
+export const deleteQueryFromHistory = (id: string) =>
+  invoke<void>("delete_query_from_history", { id });
+
+export const clearQueryHistory = () =>
+  invoke<void>("clear_query_history");
+
 export const importRowsFromFile = (
   connectionId: string,
   schema: string,

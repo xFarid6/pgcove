@@ -67,6 +67,15 @@ function renameTab(id: string) {
     tab.name = newName.trim();
   }
 }
+
+function loadQuery(sql: string) {
+  const tab = activeTab.value;
+  if (tab) {
+    tab.sql = sql;
+  }
+}
+
+defineExpose({ loadQuery });
 </script>
 
 <template>

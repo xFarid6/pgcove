@@ -45,6 +45,7 @@ import ConnectionList from "./components/ConnectionList.vue";
 import DataGrid from "./components/DataGrid.vue";
 import MigrationsPanel from "./components/MigrationsPanel.vue";
 import QueryEditorTabs from "./components/QueryEditorTabs.vue";
+import QueryHistoryPanel from "./components/QueryHistoryPanel.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
 import SupabasePanel from "./components/SupabasePanel.vue";
 import TableList from "./components/TableList.vue";
@@ -90,6 +91,11 @@ const queryRows = ref<Row[]>([]);
 const queryError = ref("");
 const queryRunning = ref(false);
 const ddlError = ref("");
+const queryEditorTabs = ref();
+
+function onLoadQueryFromHistory(sql: string) {
+  queryEditorTabs.value?.loadQuery(sql);
+}
 
 async function refreshConnections() {
   connections.value = await listConnections();
@@ -552,17 +558,23 @@ onMounted(async () => {
           </template>
         </template>
         <template v-else-if="tab === 'query'">
-          <QueryEditorTabs
-            :running="queryRunning"
-            @run="onRunQuery"
-          />
-          <p
-            v-if="queryError"
-            class="error"
-          >
-            {{ queryError }}
-          </p>
-          <DataGrid :rows="queryRows" />
+          <div class="query-tab-container">
+            <div class="query-editor-section">
+              <QueryEditorTabs
+                ref="queryEditorTabs"
+                :running="queryRunning"
+                @run="onRunQuery"
+              />
+              <p
+                v-if="queryError"
+                class="error"
+              >
+                {{ queryError }}
+              </p>
+              <DataGrid :rows="queryRows" />
+            </div>
+            <QueryHistoryPanel @load="onLoadQueryFromHistory" />
+          </div>
         </template>
         <SupabasePanel
           v-else-if="tab === 'supabase'"
@@ -732,5 +744,19 @@ input, textarea, select {
 .hint {
   padding: 1rem;
   opacity: 0.7;
+}
+
+.query-tab-container {
+  display: flex;
+  gap: 0.5rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.query-editor-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 </style>
