@@ -278,3 +278,17 @@ export const loadSettings = () =>
 
 export const saveSettings = (settings: AppSettings) =>
   invoke<void>("save_settings", { settings });
+
+export const importRowsFromFile = (
+  connectionId: string,
+  schema: string,
+  table: string,
+  filePath: string,
+) => invoke<void>("import_rows_from_file", { connectionId, schema, table, filePath });
+
+export const importRows = (
+  connectionId: string,
+  schema: string,
+  table: string,
+  rows: Row[],
+) => invoke<void>("import_rows", { connectionId, schema, table, rows });

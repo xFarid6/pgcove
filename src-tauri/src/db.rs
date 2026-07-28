@@ -663,6 +663,152 @@ pub async fn update_cell(
     Ok(())
 }
 
+/// Insert rows into a table from parsed CSV/JSON (issue #32). Column names
+/// must match exactly (case-sensitive); unmatched columns are reported as
+/// errors rather than silently ignored.
+pub async fn insert_rows_batch(
+    db: &Db,
+    schema: &str,
+    table: &str,
+    rows: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    // Extract column names from the first row
+    let first_obj = rows[0]
+        .as_object()
+        .ok_or_else(|| "each row must be a JSON object".to_string())?;
+    let columns: Vec<String> = first_obj.keys().cloned().collect();
+    if columns.is_empty() {
+        return Err("first row has no columns".to_string());
+    }
+
+    // Validate all rows have the same structure
+    for row in &rows {
+        let obj = row
+            .as_object()
+            .ok_or_else(|| "each row must be a JSON object".to_string())?;
+        let row_cols: std::collections::HashSet<_> = obj.keys().collect();
+        let expected_cols: std::collections::HashSet<_> = columns.iter().collect();
+        if row_cols != expected_cols {
+            return Err(
+                "all rows must have the same columns with no extras or missing columns".to_string(),
+            );
+        }
+    }
+
+    match db {
+        Db::Postgres(pool) => {
+            // Build parameterized INSERT statement
+            let col_names = columns
+                .iter()
+                .map(|c| quote_ident(c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let placeholders = (0..columns.len())
+                .map(|i| format!("${}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "INSERT INTO {}.{} ({}) VALUES ({})",
+                quote_ident(schema),
+                quote_ident(table),
+                col_names,
+                placeholders
+            );
+
+            for row in rows {
+                let obj = row.as_object().unwrap();
+                let mut q = sqlx::query(&sql);
+                for col in &columns {
+                    let val = &obj[col];
+                    if val.is_null() {
+                        q = q.bind(None::<String>);
+                    } else {
+                        q = q.bind(val.to_string());
+                    }
+                }
+                q.execute(pool)
+                    .await
+                    .map_err(|e| format!("insert failed: {}", e))?;
+            }
+            Ok(())
+        }
+        Db::Sqlite(pool) => {
+            // SQLite: use parameterized INSERT with ? placeholders
+            let col_names = columns
+                .iter()
+                .map(|c| quote_ident(c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let placeholders = (0..columns.len())
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "INSERT INTO {} ({}) VALUES ({})",
+                quote_ident(table),
+                col_names,
+                placeholders
+            );
+
+            for row in rows {
+                let obj = row.as_object().unwrap();
+                let mut q = sqlx::query(&sql);
+                for col in &columns {
+                    let val = &obj[col];
+                    if val.is_null() {
+                        q = q.bind(None::<String>);
+                    } else {
+                        q = q.bind(val.to_string());
+                    }
+                }
+                q.execute(pool)
+                    .await
+                    .map_err(|e| format!("insert failed: {}", e))?;
+            }
+            Ok(())
+        }
+        Db::MySql(pool) => {
+            // MySQL: use backtick quoting and ? placeholders
+            let col_names = columns
+                .iter()
+                .map(|c| quote_ident_mysql(c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let placeholders = (0..columns.len())
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "INSERT INTO {} ({}) VALUES ({})",
+                quote_ident_mysql(table),
+                col_names,
+                placeholders
+            );
+
+            for row in rows {
+                let obj = row.as_object().unwrap();
+                let mut q = sqlx::query(&sql);
+                for col in &columns {
+                    let val = &obj[col];
+                    if val.is_null() {
+                        q = q.bind(None::<String>);
+                    } else {
+                        q = q.bind(val.to_string());
+                    }
+                }
+                q.execute(pool)
+                    .await
+                    .map_err(|e| format!("insert failed: {}", e))?;
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Row-level-security policies from the real `pg_policies` catalog — the
 /// Supabase panel's data source. A proper RLS editor is issue #6.
 #[derive(Debug, Clone, Serialize)]
