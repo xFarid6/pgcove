@@ -123,7 +123,7 @@ describe("App", () => {
 
     expect(api.supabaseProjectInfo).toHaveBeenCalledWith("sb");
     expect(api.supabaseListUsers).toHaveBeenCalledWith("sb", 1, 50);
-    await w.findAll(".toolbar button")[3].trigger("click");
+    await w.findAll(".toolbar button")[4].trigger("click");
     expect(w.text()).toContain("abcdefgh");
     expect(w.text()).toContain("avatars");
     expect(w.text()).toContain("a@example.com");
@@ -155,7 +155,7 @@ describe("App", () => {
 
     // A failed self-check must not go on to ask for buckets with a bad key.
     expect(api.supabaseListBuckets).not.toHaveBeenCalled();
-    await w.findAll(".toolbar button")[3].trigger("click");
+    await w.findAll(".toolbar button")[4].trigger("click");
     expect(w.text()).toContain("401 Unauthorized");
   });
 
@@ -170,7 +170,7 @@ describe("App", () => {
       await flushPromises();
       await w.find(".connection-list button.name").trigger("click");
       await flushPromises();
-      await w.findAll(".toolbar button")[3].trigger("click");
+      await w.findAll(".toolbar button")[4].trigger("click");
       await w.find("input[placeholder='table']").setValue("todos");
       await w.find("input[placeholder='policy name']").setValue("own rows");
       return w;
@@ -372,7 +372,7 @@ describe("App", () => {
       await flushPromises();
       await w.find(".connection-list button.name").trigger("click");
       await flushPromises();
-      await w.findAll(".toolbar button")[3].trigger("click");
+      await w.findAll(".toolbar button")[4].trigger("click");
       return w;
     }
 
@@ -429,7 +429,7 @@ describe("App", () => {
       await flushPromises();
       await w.find(".connection-list button.name").trigger("click");
       await flushPromises();
-      await w.findAll(".toolbar button")[4].trigger("click");
+      await w.findAll(".toolbar button")[5].trigger("click");
       return w;
     }
 
