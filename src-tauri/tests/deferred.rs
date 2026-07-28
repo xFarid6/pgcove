@@ -23,6 +23,10 @@ async fn fetches_project_info_and_buckets_from_a_live_project() {
     client.list_buckets().await.unwrap();
 }
 
+// Issue #13 (app settings) shipped: theme + query defaults roundtrip is
+// covered in settings.rs's unit tests (serialize/deserialize, load/save,
+// defaults).
+
 #[test]
 #[ignore = "not implemented — edge function listing needs a Supabase management access token (api.supabase.com), not the service-role key; fast-follow to pgcove issue #5"]
 fn lists_edge_functions_via_management_api() {}

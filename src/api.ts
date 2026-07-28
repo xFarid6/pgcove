@@ -263,3 +263,18 @@ export const supabaseDeleteUser = (connectionId: string, userId: string) =>
 
 export const supabaseListEdgeFunctions = (connectionId: string) =>
   invoke<EdgeFunction[]>("supabase_list_edge_functions", { connectionId });
+
+export interface AppSettings {
+  /** "light" | "dark" | "system" — defaults to "dark" */
+  theme: "light" | "dark" | "system";
+  /** Default row limit for table browse/query results. */
+  defaultRowLimit: number;
+  /** Statement timeout in seconds. */
+  defaultStatementTimeout: number;
+}
+
+export const loadSettings = () =>
+  invoke<AppSettings>("load_settings");
+
+export const saveSettings = (settings: AppSettings) =>
+  invoke<void>("save_settings", { settings });

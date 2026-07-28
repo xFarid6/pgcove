@@ -9,6 +9,7 @@ use crate::db::{
     self, AuthUser, Db, PolicyDraft, PolicyInfo, RowsPage, RowsQuery, TableInfo, TableStructure,
 };
 use crate::migrations::{self, MigrationInfo};
+use crate::settings::{self};
 use crate::ssh_tunnel::{self, SshTunnels, TunnelHandle};
 use crate::supabase::{AdminUser, EdgeFunction, ProjectInfo, StorageBucket, SupabaseClient};
 
@@ -323,4 +324,17 @@ pub async fn supabase_list_edge_functions(
     supabase_for(&app, &connection_id)?
         .list_edge_functions()
         .await
+}
+
+#[tauri::command]
+pub fn load_settings(app: tauri::AppHandle) -> Result<crate::settings::AppSettings, String> {
+    settings::load(&store_dir(&app)?)
+}
+
+#[tauri::command]
+pub fn save_settings(
+    app: tauri::AppHandle,
+    settings: crate::settings::AppSettings,
+) -> Result<(), String> {
+    settings::save(&store_dir(&app)?, &settings)
 }
