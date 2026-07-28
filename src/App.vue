@@ -41,7 +41,7 @@ import ConnectionForm from "./components/ConnectionForm.vue";
 import ConnectionList from "./components/ConnectionList.vue";
 import DataGrid from "./components/DataGrid.vue";
 import MigrationsPanel from "./components/MigrationsPanel.vue";
-import QueryEditor from "./components/QueryEditor.vue";
+import QueryEditorTabs from "./components/QueryEditorTabs.vue";
 import SupabasePanel from "./components/SupabasePanel.vue";
 import TableList from "./components/TableList.vue";
 
@@ -477,7 +477,7 @@ onMounted(refreshConnections);
           </template>
         </template>
         <template v-else-if="tab === 'query'">
-          <QueryEditor
+          <QueryEditorTabs
             :running="queryRunning"
             @run="onRunQuery"
           />
