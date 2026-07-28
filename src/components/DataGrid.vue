@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { Row } from "../api";
+import * as api from "../api";
 import { downloadFile, rowsToCsv, rowsToJson } from "../export";
+import { openImportFile } from "../import";
 
 const props = withDefaults(
   defineProps<{
@@ -15,6 +17,12 @@ const props = withDefaults(
     sortDesc?: boolean;
     editable?: boolean;
     pkColumns?: string[];
+    /** Connection ID for import operations — if provided, enables import button. */
+    connectionId?: string;
+    /** Schema name for import — required if connectionId is set. */
+    schema?: string;
+    /** Table name for import — required if connectionId is set. */
+    table?: string;
   }>(),
   {
     pageable: false,
@@ -24,6 +32,9 @@ const props = withDefaults(
     sortColumn: "",
     sortDesc: false,
     pkColumns: () => [],
+    connectionId: undefined,
+    schema: undefined,
+    table: undefined,
   },
 );
 
@@ -32,6 +43,7 @@ const emit = defineEmits<{
   page: [page: number];
   filter: [column: string, value: string];
   edit: [rowIndex: number, column: string, value: string];
+  import: [];
 }>();
 
 // Cached rather than a plain computed so the header/filter list survives a
@@ -70,6 +82,20 @@ function exportCsv() {
 
 function exportJson() {
   downloadFile("export.json", rowsToJson(props.rows), "application/json;charset=utf-8");
+}
+
+async function handleImport() {
+  if (!props.connectionId || !props.schema || !props.table) return;
+
+  const filePath = await openImportFile();
+  if (!filePath) return;
+
+  try {
+    await api.importRowsFromFile(props.connectionId, props.schema, props.table, filePath);
+    emit("import");
+  } catch (e) {
+    alert(`Import failed: ${e}`);
+  }
 }
 
 const editing = ref<{ row: number; col: string } | null>(null);
@@ -139,20 +165,28 @@ function cancelEdit() {
       </button>
     </div>
     <div
-      v-if="rows.length > 0"
       class="export-controls"
     >
+      <div v-if="rows.length > 0">
+        <button
+          type="button"
+          @click="exportCsv"
+        >
+          Export CSV
+        </button>
+        <button
+          type="button"
+          @click="exportJson"
+        >
+          Export JSON
+        </button>
+      </div>
       <button
+        v-if="connectionId"
         type="button"
-        @click="exportCsv"
+        @click="handleImport"
       >
-        Export CSV
-      </button>
-      <button
-        type="button"
-        @click="exportJson"
-      >
-        Export JSON
+        Import CSV/JSON
       </button>
     </div>
     <table v-if="rows.length > 0">
