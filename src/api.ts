@@ -152,6 +152,23 @@ export interface TableStructure {
   constraints: ConstraintInfo[];
 }
 
+export interface ForeignKey {
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+}
+
+export interface ErdTable {
+  schema: string;
+  name: string;
+}
+
+export interface ErdData {
+  tables: ErdTable[];
+  foreignKeys: ForeignKey[];
+}
+
 export const listConnections = () =>
   invoke<ConnectionInfo[]>("list_connections");
 
@@ -201,6 +218,9 @@ export const runQuery = (connectionId: string, sql: string) =>
 
 export const tableStructure = (connectionId: string, schema: string, table: string) =>
   invoke<TableStructure>("table_structure", { connectionId, schema, table });
+
+export const erdData = (connectionId: string, schema: string) =>
+  invoke<ErdData>("erd_data", { connectionId, schema });
 
 export const listPolicies = (connectionId: string) =>
   invoke<PolicyInfo[]>("list_policies", { connectionId });

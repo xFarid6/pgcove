@@ -1170,6 +1170,183 @@ pub async fn table_structure(db: &Db, schema: &str, table: &str) -> Result<Table
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForeignKey {
+    pub from_table: String,
+    pub from_column: String,
+    pub to_table: String,
+    pub to_column: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErdTable {
+    pub schema: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErdData {
+    pub tables: Vec<ErdTable>,
+    pub foreign_keys: Vec<ForeignKey>,
+}
+
+pub async fn erd_data(db: &Db, schema: &str) -> Result<ErdData, String> {
+    match db {
+        Db::Postgres(pool) => {
+            let tables_result = sqlx::query(
+                "SELECT table_name::text
+                 FROM information_schema.tables
+                 WHERE table_schema = $1 AND table_type = 'BASE TABLE'
+                 ORDER BY table_name",
+            )
+            .bind(schema)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+            let tables = tables_result
+                .iter()
+                .map(|r| {
+                    Ok(ErdTable {
+                        schema: schema.to_string(),
+                        name: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            let fk_rows = sqlx::query(
+                "SELECT
+                    kcu1.table_name, kcu1.column_name,
+                    kcu2.table_name, kcu2.column_name
+                 FROM information_schema.referential_constraints rc
+                 JOIN information_schema.key_column_usage kcu1
+                   ON rc.constraint_name = kcu1.constraint_name
+                   AND rc.table_schema = kcu1.table_schema
+                 JOIN information_schema.key_column_usage kcu2
+                   ON rc.unique_constraint_name = kcu2.constraint_name
+                   AND rc.unique_constraint_schema = kcu2.table_schema
+                 WHERE rc.constraint_schema = $1
+                 ORDER BY rc.constraint_name",
+            )
+            .bind(schema)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+            let foreign_keys = fk_rows
+                .iter()
+                .map(|r| {
+                    Ok(ForeignKey {
+                        from_table: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                        from_column: r.try_get(1).map_err(|e: sqlx::Error| e.to_string())?,
+                        to_table: r.try_get(2).map_err(|e: sqlx::Error| e.to_string())?,
+                        to_column: r.try_get(3).map_err(|e: sqlx::Error| e.to_string())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            Ok(ErdData {
+                tables,
+                foreign_keys,
+            })
+        }
+        Db::Sqlite(pool) => {
+            let tables_result = sqlx::query(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                 ORDER BY name",
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+            let tables = tables_result
+                .iter()
+                .map(|r| {
+                    Ok(ErdTable {
+                        schema: "main".to_string(),
+                        name: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            let mut foreign_keys = Vec::new();
+
+            for table in &tables {
+                let pragma_sql = format!("PRAGMA foreign_key_list({})", quote_ident(&table.name));
+                let fk_rows = sqlx::query(&pragma_sql)
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                for row in fk_rows {
+                    foreign_keys.push(ForeignKey {
+                        from_table: table.name.clone(),
+                        from_column: row.try_get(3).map_err(|e: sqlx::Error| e.to_string())?,
+                        to_table: row.try_get(2).map_err(|e: sqlx::Error| e.to_string())?,
+                        to_column: row.try_get(4).map_err(|e: sqlx::Error| e.to_string())?,
+                    });
+                }
+            }
+
+            Ok(ErdData {
+                tables,
+                foreign_keys,
+            })
+        }
+        Db::MySql(pool) => {
+            let tables_result = sqlx::query(
+                "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'
+                 ORDER BY TABLE_NAME",
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+            let tables = tables_result
+                .iter()
+                .map(|r| {
+                    Ok(ErdTable {
+                        schema: "default".to_string(),
+                        name: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            let fk_rows = sqlx::query(
+                "SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
+                 FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                 WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
+                 ORDER BY CONSTRAINT_NAME",
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+
+            let foreign_keys = fk_rows
+                .iter()
+                .map(|r| {
+                    Ok(ForeignKey {
+                        from_table: r.try_get(0).map_err(|e: sqlx::Error| e.to_string())?,
+                        from_column: r.try_get(1).map_err(|e: sqlx::Error| e.to_string())?,
+                        to_table: r.try_get(2).map_err(|e: sqlx::Error| e.to_string())?,
+                        to_column: r.try_get(3).map_err(|e: sqlx::Error| e.to_string())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            Ok(ErdData {
+                tables,
+                foreign_keys,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1488,5 +1665,31 @@ mod tests {
     async fn sqlite_ping_succeeds() {
         let db = sqlite_memory().await;
         ping(&db).await.expect("ping should succeed");
+    }
+
+    #[tokio::test]
+    async fn sqlite_erd_data_lists_tables_and_fks() {
+        let db = sqlite_memory().await;
+        run_query(&db, "CREATE TABLE users (id INTEGER PRIMARY KEY)")
+            .await
+            .unwrap();
+        run_query(
+            &db,
+            "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id))",
+        )
+        .await
+        .unwrap();
+
+        let erd = erd_data(&db, "main").await.unwrap();
+        assert_eq!(erd.tables.len(), 2);
+        assert!(erd.tables.iter().any(|t| t.name == "users"));
+        assert!(erd.tables.iter().any(|t| t.name == "posts"));
+
+        assert_eq!(erd.foreign_keys.len(), 1);
+        let fk = &erd.foreign_keys[0];
+        assert_eq!(fk.from_table, "posts");
+        assert_eq!(fk.from_column, "user_id");
+        assert_eq!(fk.to_table, "users");
+        assert_eq!(fk.to_column, "id");
     }
 }
