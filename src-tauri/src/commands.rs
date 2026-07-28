@@ -10,7 +10,7 @@ use crate::db::{
 };
 use crate::migrations::{self, MigrationInfo};
 use crate::ssh_tunnel::{self, SshTunnels, TunnelHandle};
-use crate::supabase::{AdminUser, ProjectInfo, StorageBucket, SupabaseClient};
+use crate::supabase::{AdminUser, EdgeFunction, ProjectInfo, StorageBucket, SupabaseClient};
 
 fn store_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
@@ -65,7 +65,7 @@ async fn pool_for(app: &tauri::AppHandle, id: &str) -> Result<Db, String> {
 }
 
 /// Same shape as `pool_for`, for the Supabase HTTP APIs: project URL from the
-/// saved connection, service-role key from the keyring.
+/// saved connection, service-role key and optional management token from the keyring.
 fn supabase_for(app: &tauri::AppHandle, id: &str) -> Result<SupabaseClient, String> {
     let info = connections::get(&store_dir(app)?, id)?;
     let url = info
@@ -74,7 +74,8 @@ fn supabase_for(app: &tauri::AppHandle, id: &str) -> Result<SupabaseClient, Stri
         .ok_or_else(|| "this connection is not a Supabase project".to_string())?;
     let key = connections::get_service_key(id)
         .map_err(|e| format!("no service-role key saved for this connection ({e})"))?;
-    SupabaseClient::new(&url, &key)
+    let mgmt_token = connections::get_mgmt_token(id).ok();
+    SupabaseClient::new_with_mgmt_token(&url, &key, mgmt_token)
 }
 
 #[tauri::command]
@@ -89,11 +90,19 @@ pub fn save_connection(
     password: Option<String>,
     service_key: Option<String>,
     ssh_secret: Option<String>,
+    mgmt_token: Option<String>,
 ) -> Result<(), String> {
     // Evict any tunnel already running under the old config — otherwise an
     // edited bastion/auth method wouldn't take effect until app restart.
     app.state::<SshTunnels>().0.lock().unwrap().remove(&info.id);
-    connections::save(&store_dir(&app)?, info, password, service_key, ssh_secret)
+    connections::save(
+        &store_dir(&app)?,
+        info,
+        password,
+        service_key,
+        ssh_secret,
+        mgmt_token,
+    )
 }
 
 #[tauri::command]
@@ -301,5 +310,17 @@ pub async fn supabase_delete_user(
 ) -> Result<(), String> {
     supabase_for(&app, &connection_id)?
         .delete_user(&user_id)
+        .await
+}
+
+/// Edge functions via the Management API (issue #30). Requires a personal
+/// management access token stored separately from the service-role key.
+#[tauri::command]
+pub async fn supabase_list_edge_functions(
+    app: tauri::AppHandle,
+    connection_id: String,
+) -> Result<Vec<EdgeFunction>, String> {
+    supabase_for(&app, &connection_id)?
+        .list_edge_functions()
         .await
 }

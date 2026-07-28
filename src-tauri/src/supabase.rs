@@ -1,15 +1,9 @@
-//! Supabase project APIs reachable with a project URL + service-role key.
-//!
-//! Scope note (issue #5): a service-role key is a *data-plane* credential —
-//! it talks to the project's own host (`https://<ref>.supabase.co`), which
-//! gets us the PostgREST root (used here as the project self-check) and the
-//! Storage API's bucket list. Listing edge functions is deliberately NOT
-//! here: that endpoint lives on the Management API
-//! (`api.supabase.com/v1/projects/<ref>/functions`) and authenticates with a
-//! personal/management access token, a different credential the user would
-//! have to add separately. Stretching the service-role key to cover it would
-//! just 401. Adding that second token is the fast-follow to #5 — see the
-//! `lists_edge_functions_via_management_api` stub in tests/deferred.rs.
+//! Supabase project APIs reachable with a project URL + service-role key
+//! (issue #5), plus edge function listing via the Management API with a
+//! personal/management access token (issue #30). The service-role key is a
+//! data-plane credential (talks to `https://<ref>.supabase.co`); the
+//! management token is control-plane (talks to `api.supabase.com`) and is
+//! optional — edge functions are only listed when it's provided.
 //!
 //! reqwest is configured with rustls (no native-tls), matching the sqlx TLS
 //! choice in Cargo.toml so the binary has no OpenSSL dependency.
@@ -135,22 +129,56 @@ pub fn parse_admin_users(body: &str) -> Result<Vec<AdminUser>, String> {
     Ok(resp.users)
 }
 
+/// An edge function as returned by `GET /v1/projects/<ref>/functions` on the
+/// Management API. Supabase sends snake_case names; the aliases let the same
+/// struct serialize to camelCase the frontend expects.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeFunction {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    pub slug: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, alias = "created_at")]
+    pub created_at: String,
+    #[serde(default, alias = "updated_at")]
+    pub updated_at: String,
+}
+
+/// Parse `GET /v1/projects/<ref>/functions` from the Management API.
+pub fn parse_edge_functions(body: &str) -> Result<Vec<EdgeFunction>, String> {
+    serde_json::from_str(body)
+        .map_err(|e| format!("unexpected Management API /functions response: {e}"))
+}
+
 /// Small HTTP client for one Supabase project. Not a generic API framework —
 /// just base URL + key + the two calls the panel needs.
 pub struct SupabaseClient {
     base_url: String,
     service_key: String,
+    mgmt_token: Option<String>,
     http: reqwest::Client,
 }
 
 impl SupabaseClient {
     pub fn new(project_url: &str, service_key: &str) -> Result<Self, String> {
+        Self::new_with_mgmt_token(project_url, service_key, None)
+    }
+
+    pub fn new_with_mgmt_token(
+        project_url: &str,
+        service_key: &str,
+        mgmt_token: Option<String>,
+    ) -> Result<Self, String> {
         if service_key.trim().is_empty() {
             return Err("Supabase service-role key is empty".to_string());
         }
         Ok(Self {
             base_url: normalize_project_url(project_url)?,
             service_key: service_key.trim().to_string(),
+            mgmt_token: mgmt_token.map(|t| t.trim().to_string()),
             http: reqwest::Client::builder()
                 .user_agent(USER_AGENT)
                 .build()
@@ -253,6 +281,47 @@ impl SupabaseClient {
             .await
             .map_err(|e| e.to_string())?;
         Self::check_status(resp).await
+    }
+
+    /// GET builder for the Management API (`api.supabase.com`), carrying the
+    /// authorization header for the personal/management access token.
+    fn get_mgmt(&self, path: &str) -> Result<reqwest::RequestBuilder, String> {
+        let token = self
+            .mgmt_token
+            .as_ref()
+            .ok_or_else(|| "Supabase management token is not set".to_string())?;
+        Ok(self
+            .http
+            .get(format!("https://api.supabase.com{path}"))
+            .bearer_auth(token))
+    }
+
+    async fn mgmt_get_text(&self, path: &str) -> Result<String, String> {
+        let resp = self
+            .get_mgmt(path)?
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = resp.status();
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        if !status.is_success() {
+            return Err(format!(
+                "Supabase Management API {path} returned {status}: {}",
+                body.trim()
+            ));
+        }
+        Ok(body)
+    }
+
+    pub async fn list_edge_functions(&self) -> Result<Vec<EdgeFunction>, String> {
+        let project_ref = project_ref(&self.base_url).ok_or_else(|| {
+            "cannot list edge functions: project URL is not a Supabase project".to_string()
+        })?;
+        parse_edge_functions(
+            &self
+                .mgmt_get_text(&format!("/v1/projects/{project_ref}/functions"))
+                .await?,
+        )
     }
 }
 
@@ -442,5 +511,77 @@ mod tests {
         let del_req = client.delete("/auth/v1/admin/users/u1").build().unwrap();
         assert_eq!(del_req.method(), reqwest::Method::DELETE);
         assert_eq!(del_req.headers()["authorization"], "Bearer service-key-123");
+    }
+
+    #[test]
+    fn parses_edge_functions_from_management_api() {
+        let body = r#"[
+            {
+              "id": "func-1",
+              "name": "hello",
+              "slug": "hello",
+              "status": "active",
+              "created_at": "2026-01-02T00:00:00Z",
+              "updated_at": "2026-01-02T00:00:00Z"
+            },
+            {
+              "id": "func-2",
+              "name": "goodbye",
+              "slug": "goodbye",
+              "status": "active",
+              "created_at": "2026-01-03T00:00:00Z",
+              "updated_at": "2026-01-03T00:00:00Z"
+            }
+        ]"#;
+        let funcs = parse_edge_functions(body).unwrap();
+        assert_eq!(funcs.len(), 2);
+        assert_eq!(funcs[0].name, "hello");
+        assert_eq!(funcs[1].slug, "goodbye");
+    }
+
+    #[test]
+    fn edge_functions_serialize_to_camel_case() {
+        let json = serde_json::to_value(EdgeFunction {
+            id: "f1".into(),
+            name: "my-func".into(),
+            slug: "my-func".into(),
+            status: "active".into(),
+            created_at: "2026-01-02".into(),
+            updated_at: "2026-01-03".into(),
+        })
+        .unwrap();
+        assert_eq!(json["createdAt"], "2026-01-02");
+        assert_eq!(json["updatedAt"], "2026-01-03");
+    }
+
+    #[test]
+    fn empty_edge_functions_list_is_not_an_error() {
+        assert_eq!(parse_edge_functions("[]").unwrap(), vec![]);
+    }
+
+    #[test]
+    fn client_without_mgmt_token_cannot_list_functions() {
+        let client = SupabaseClient::new("https://abc.supabase.co", "service-key-123").unwrap();
+        assert!(client.get_mgmt("/v1/test").is_err());
+    }
+
+    #[test]
+    fn client_with_mgmt_token_builds_management_api_request() {
+        let client = SupabaseClient::new_with_mgmt_token(
+            "https://abc.supabase.co/",
+            "service-key-123",
+            Some("mgmt-token-456".into()),
+        )
+        .unwrap();
+        let req = client
+            .get_mgmt("/v1/projects/abcdefgh/functions")
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(
+            req.url().as_str(),
+            "https://api.supabase.com/v1/projects/abcdefgh/functions"
+        );
+        assert_eq!(req.headers()["authorization"], "Bearer mgmt-token-456");
     }
 }

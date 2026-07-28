@@ -130,6 +130,15 @@ fn ssh_secret_entry(id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYRING_SERVICE, &ssh_secret_account(id)).map_err(|e| e.to_string())
 }
 
+/// Keyring account for a connection's Supabase management access token.
+fn mgmt_token_account(id: &str) -> String {
+    format!("{id}#supabase-mgmt-token")
+}
+
+fn mgmt_token_entry(id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYRING_SERVICE, &mgmt_token_account(id)).map_err(|e| e.to_string())
+}
+
 /// `get_password` needs no profile-store directory — the secret lives only
 /// in the keyring — so it builds a `ProfileStore` with an unused, never-read
 /// dir.
@@ -151,10 +160,16 @@ pub fn get_ssh_secret(id: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Upsert a connection; `password`, `service_key` and `ssh_secret` are
+pub fn get_mgmt_token(id: &str) -> Result<String, String> {
+    mgmt_token_entry(id)?
+        .get_password()
+        .map_err(|e| e.to_string())
+}
+
+/// Upsert a connection; `password`, `service_key`, `ssh_secret`, and `mgmt_token` are
 /// written to the keyring when provided (add, or edit that changes them).
 /// `password` and the profile file go through conn-manager's `ProfileStore`;
-/// `service_key`/`ssh_secret` are secondary secrets it doesn't model, so they
+/// `service_key`/`ssh_secret`/`mgmt_token` are secondary secrets it doesn't model, so they
 /// go straight to `keyring`.
 pub fn save(
     dir: &Path,
@@ -162,6 +177,7 @@ pub fn save(
     password: Option<String>,
     service_key: Option<String>,
     ssh_secret: Option<String>,
+    mgmt_token: Option<String>,
 ) -> Result<(), String> {
     if let Some(k) = service_key {
         service_key_entry(&info.id)?
@@ -173,6 +189,11 @@ pub fn save(
             .set_password(&s)
             .map_err(|e| e.to_string())?;
     }
+    if let Some(t) = mgmt_token {
+        mgmt_token_entry(&info.id)?
+            .set_password(&t)
+            .map_err(|e| e.to_string())?;
+    }
     store(dir).save(info, password).map_err(|e| e.to_string())
 }
 
@@ -182,6 +203,9 @@ pub fn delete(dir: &Path, id: &str) -> Result<(), String> {
         let _ = entry.delete_credential();
     }
     if let Ok(entry) = ssh_secret_entry(id) {
+        let _ = entry.delete_credential();
+    }
+    if let Ok(entry) = mgmt_token_entry(id) {
         let _ = entry.delete_credential();
     }
     store(dir)
@@ -213,14 +237,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(load(dir.path()).unwrap(), vec![]);
 
-        save(dir.path(), conn("a"), None, None, None).unwrap();
-        save(dir.path(), conn("b"), None, None, None).unwrap();
+        save(dir.path(), conn("a"), None, None, None, None).unwrap();
+        save(dir.path(), conn("b"), None, None, None, None).unwrap();
         assert_eq!(load(dir.path()).unwrap().len(), 2);
 
         // Upsert replaces, not duplicates.
         let mut edited = conn("a");
         edited.name = "renamed".into();
-        save(dir.path(), edited, None, None, None).unwrap();
+        save(dir.path(), edited, None, None, None, None).unwrap();
         assert_eq!(load(dir.path()).unwrap().len(), 2);
         assert_eq!(get(dir.path(), "a").unwrap().name, "renamed");
 
@@ -247,8 +271,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut sb = conn("sb");
         sb.supabase_url = Some("https://abcdefgh.supabase.co".into());
-        save(dir.path(), sb, None, None, None).unwrap();
-        save(dir.path(), conn("plain"), None, None, None).unwrap();
+        save(dir.path(), sb, None, None, None, None).unwrap();
+        save(dir.path(), conn("plain"), None, None, None, None).unwrap();
 
         assert_eq!(
             get(dir.path(), "sb").unwrap().supabase_url.as_deref(),
@@ -290,8 +314,8 @@ mod tests {
                 key_path: "/home/me/.ssh/id_ed25519".into(),
             },
         });
-        save(dir.path(), tunneled, None, None, None).unwrap();
-        save(dir.path(), conn("plain"), None, None, None).unwrap();
+        save(dir.path(), tunneled, None, None, None, None).unwrap();
+        save(dir.path(), conn("plain"), None, None, None, None).unwrap();
 
         let loaded = get(dir.path(), "t").unwrap().ssh_tunnel.unwrap();
         assert_eq!(loaded.host, "bastion.example.com");
@@ -317,7 +341,7 @@ mod tests {
             user: "deploy".into(),
             auth: SshAuth::Agent,
         });
-        save(dir.path(), tunneled, None, None, None).unwrap();
+        save(dir.path(), tunneled, None, None, None, None).unwrap();
         assert_eq!(
             get(dir.path(), "t").unwrap().ssh_tunnel.unwrap().auth,
             SshAuth::Agent
@@ -337,6 +361,14 @@ mod tests {
         assert_ne!(ssh_secret_account("abc"), service_key_account("abc"));
     }
 
+    #[test]
+    fn mgmt_token_uses_a_distinct_keyring_account() {
+        assert_ne!(mgmt_token_account("abc"), "abc");
+        assert!(mgmt_token_account("abc").starts_with("abc"));
+        assert_ne!(mgmt_token_account("abc"), service_key_account("abc"));
+        assert_ne!(mgmt_token_account("abc"), ssh_secret_account("abc"));
+    }
+
     // Real OS keyring roundtrip. Ignored in CI (headless ubuntu has no Secret
     // Service); run locally with `cargo test -- --ignored`.
     #[test]
@@ -344,7 +376,15 @@ mod tests {
     fn keyring_password_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let id = "pgcove-test-keyring";
-        save(dir.path(), conn(id), Some("s3cret".into()), None, None).unwrap();
+        save(
+            dir.path(),
+            conn(id),
+            Some("s3cret".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(get_password(id).unwrap(), "s3cret");
         delete(dir.path(), id).unwrap();
         assert!(get_password(id).is_err());
@@ -361,6 +401,7 @@ mod tests {
             conn(id),
             Some("s3cret".into()),
             Some("service-role-key".into()),
+            None,
             None,
         )
         .unwrap();
@@ -382,11 +423,32 @@ mod tests {
             Some("s3cret".into()),
             None,
             Some("ssh-passphrase".into()),
+            None,
         )
         .unwrap();
         assert_eq!(get_password(id).unwrap(), "s3cret");
         assert_eq!(get_ssh_secret(id).unwrap(), "ssh-passphrase");
         delete(dir.path(), id).unwrap();
         assert!(get_ssh_secret(id).is_err());
+    }
+
+    #[test]
+    #[ignore = "requires a real OS keyring; run locally with --ignored"]
+    fn keyring_mgmt_token_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = "pgcove-test-keyring-mgmt";
+        save(
+            dir.path(),
+            conn(id),
+            Some("s3cret".into()),
+            None,
+            None,
+            Some("sbp_mgmt_token_abc123".into()),
+        )
+        .unwrap();
+        assert_eq!(get_password(id).unwrap(), "s3cret");
+        assert_eq!(get_mgmt_token(id).unwrap(), "sbp_mgmt_token_abc123");
+        delete(dir.path(), id).unwrap();
+        assert!(get_mgmt_token(id).is_err());
     }
 }
