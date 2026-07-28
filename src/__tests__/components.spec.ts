@@ -335,6 +335,114 @@ describe("DataGrid", () => {
     await w.findAll("td")[1].trigger("dblclick");
     expect(w.find("input.cell-input").exists()).toBe(false);
   });
+
+  it("pushes an edit to the undo stack when committed", async () => {
+    const w = mount(DataGrid, {
+      props: {
+        rows: [{ id: 1, title: "buy milk" }],
+        editable: true,
+        pkColumns: ["id"],
+      },
+    });
+    await w.findAll("td")[1].trigger("dblclick");
+    const input = w.find("input.cell-input");
+    await input.setValue("buy bread");
+    await input.trigger("keydown", { key: "Enter" });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((w.vm as any).undoStack).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((w.vm as any).undoStack[0]).toEqual({
+      rowIndex: 0,
+      column: "title",
+      oldValue: "buy milk",
+    });
+  });
+
+  it("disables the undo button when stack is empty", () => {
+    const w = mount(DataGrid, {
+      props: {
+        rows: [{ id: 1, title: "buy milk" }],
+        editable: true,
+        pkColumns: ["id"],
+      },
+    });
+    const undoButton = w.findAll("button").find((b) => b.text() === "Undo")!;
+    expect(undoButton.attributes("disabled")).toBeDefined();
+  });
+
+  it("enables the undo button when stack has items", async () => {
+    const w = mount(DataGrid, {
+      props: {
+        rows: [{ id: 1, title: "buy milk" }],
+        editable: true,
+        pkColumns: ["id"],
+      },
+    });
+    await w.findAll("td")[1].trigger("dblclick");
+    const input = w.find("input.cell-input");
+    await input.setValue("buy bread");
+    await input.trigger("keydown", { key: "Enter" });
+    const undoButton = w.findAll("button").find((b) => b.text() === "Undo")!;
+    expect(undoButton.attributes("disabled")).toBeUndefined();
+  });
+
+  it("emits undo event when undo button is clicked", async () => {
+    const w = mount(DataGrid, {
+      props: {
+        rows: [{ id: 1, title: "buy milk" }],
+        editable: true,
+        pkColumns: ["id"],
+      },
+    });
+    await w.findAll("td")[1].trigger("dblclick");
+    const input = w.find("input.cell-input");
+    await input.setValue("buy bread");
+    await input.trigger("keydown", { key: "Enter" });
+    const undoButton = w.findAll("button").find((b) => b.text() === "Undo")!;
+    await undoButton.trigger("click");
+    expect(w.emitted("undo")).toEqual([[0, "title", "buy milk"]]);
+  });
+
+  it("emits undo event when Ctrl+Z is pressed", async () => {
+    const w = mount(DataGrid, {
+      props: {
+        rows: [{ id: 1, title: "buy milk" }],
+        editable: true,
+        pkColumns: ["id"],
+      },
+    });
+    await w.findAll("td")[1].trigger("dblclick");
+    const input = w.find("input.cell-input");
+    await input.setValue("buy bread");
+    await input.trigger("keydown", { key: "Enter" });
+    await w.find(".data-grid").trigger("keydown", { key: "z", ctrlKey: true });
+    expect(w.emitted("undo")).toEqual([[0, "title", "buy milk"]]);
+  });
+
+  it("respects max undo size by removing oldest entries", async () => {
+    const rows = Array.from({ length: 100 }, (_, i) => ({ id: i, title: `title${i}` }));
+    const w = mount(DataGrid, {
+      props: {
+        rows,
+        editable: true,
+        pkColumns: ["id"],
+      },
+    });
+    for (let i = 0; i < 60; i++) {
+      const tds = w.findAll("td");
+      const td = tds.find((t) => t.text() === `title${i}`);
+      if (!td) continue;
+      await td.trigger("dblclick");
+      const input = w.find("input.cell-input");
+      await input.setValue(`updated${i}`);
+      await input.trigger("keydown", { key: "Enter" });
+      await w.vm.$nextTick();
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((w.vm as any).undoStack).toHaveLength(50);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((w.vm as any).undoStack[0].rowIndex).toBe(10);
+  });
 });
 
 describe("QueryEditor", () => {
