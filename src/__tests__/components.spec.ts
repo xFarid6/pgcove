@@ -132,6 +132,32 @@ describe("ConnectionForm", () => {
     expect(w.emitted("save")).toBeUndefined();
   });
 
+  it("shows a Browse button for SQLite variant", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("select").setValue("sqlite");
+    const browseBtn = w.findAll("button").find((b) => b.text() === "Browse…");
+    expect(browseBtn).toBeDefined();
+  });
+
+  it("hides the Browse button for non-SQLite variants", async () => {
+    const w = mount(ConnectionForm);
+    const noBrowseBtnAtStart = w.findAll("button").find((b) => b.text() === "Browse…");
+    expect(noBrowseBtnAtStart).toBeUndefined();
+    await w.find("select").setValue("postgres");
+    const noBrowseBtnPostgres = w.findAll("button").find((b) => b.text() === "Browse…");
+    expect(noBrowseBtnPostgres).toBeUndefined();
+  });
+
+  it("allows manual file path entry as fallback", async () => {
+    const w = mount(ConnectionForm);
+    await w.find("select").setValue("sqlite");
+    await w.find("input[placeholder^='Name']").setValue("local.db");
+    await w.find("input[placeholder^='File path']").setValue("/custom/path.db");
+    await w.find("form").trigger("submit");
+    const [info] = w.emitted("save")![0] as [ConnectionInfo, string | undefined];
+    expect(info.database).toBe("/custom/path.db");
+  });
+
   it("carries an SSH tunnel config and secret when the section is filled in", async () => {
     const w = mount(ConnectionForm);
     await w.find("select").setValue("postgres");

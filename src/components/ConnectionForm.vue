@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { ConnectionInfo, SshTunnelConfig } from "../api";
 
 const emit = defineEmits<{
@@ -83,6 +84,22 @@ function resetSshFields() {
   sshSecret.value = "";
 }
 
+async function browseSqliteFile() {
+  try {
+    const selected = await open({
+      filters: [
+        { name: "SQLite", extensions: ["db", "sqlite"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    });
+    if (selected && typeof selected === "string") {
+      filePath.value = selected;
+    }
+  } catch {
+    // User cancelled the dialog or an error occurred, fall back to manual entry
+  }
+}
+
 // Only follow the engine's default port while the field still holds *a*
 // default — once the user types their own port, stop overwriting it.
 function onVariantChange() {
@@ -164,10 +181,18 @@ function submit() {
       placeholder="Name (e.g. supabase prod)"
     >
     <template v-if="variant === 'sqlite'">
-      <input
-        v-model="filePath"
-        placeholder="File path (e.g. /home/me/app.db, or :memory:)"
-      >
+      <div class="file-picker-row">
+        <input
+          v-model="filePath"
+          placeholder="File path (e.g. /home/me/app.db, or :memory:)"
+        >
+        <button
+          type="button"
+          @click="browseSqliteFile"
+        >
+          Browse…
+        </button>
+      </div>
     </template>
     <template v-else>
       <template v-if="variant === 'supabase'">
@@ -263,5 +288,19 @@ function submit() {
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.5rem;
+}
+
+.file-picker-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.file-picker-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-picker-row button {
+  flex-shrink: 0;
 }
 </style>
