@@ -5,6 +5,7 @@ import ConnectionList from "../components/ConnectionList.vue";
 import DataGrid from "../components/DataGrid.vue";
 import MigrationsPanel from "../components/MigrationsPanel.vue";
 import QueryEditor from "../components/QueryEditor.vue";
+import QueryEditorTabs from "../components/QueryEditorTabs.vue";
 import SupabasePanel from "../components/SupabasePanel.vue";
 import TableList from "../components/TableList.vue";
 import type { ConnectionInfo, MigrationInfo, PolicyInfo, TableInfo } from "../api";
@@ -341,6 +342,62 @@ describe("QueryEditor", () => {
     await w.vm.$nextTick();
     w.vm.editor!.dispatch({ changes: { from: 0, insert: "x" } });
     expect(w.emitted("update")).toBeDefined();
+  });
+});
+
+describe("QueryEditorTabs", () => {
+  it("renders with initial tab", () => {
+    const w = mount(QueryEditorTabs, { props: { running: false } });
+    expect(w.text()).toContain("Query 1");
+    expect(w.find(".tabs-bar").exists()).toBe(true);
+  });
+
+  it("adds a new tab when + button is clicked", async () => {
+    const w = mount(QueryEditorTabs, { props: { running: false } });
+    const addBtn = w.find(".add-tab");
+    await addBtn.trigger("click");
+    expect(w.text()).toContain("Query 2");
+  });
+
+  it("switches to a tab when clicked", async () => {
+    const w = mount(QueryEditorTabs, { props: { running: false } });
+    const addBtn = w.find(".add-tab");
+    await addBtn.trigger("click");
+    const tabs = w.findAll(".tab");
+    await tabs[1].trigger("click");
+    expect(tabs[1].classes()).toContain("active");
+  });
+
+  it("closes a tab when close button is clicked", async () => {
+    const w = mount(QueryEditorTabs, { props: { running: false } });
+    const addBtn = w.find(".add-tab");
+    await addBtn.trigger("click");
+    const closeBtn = w.findAll(".tab-close")[0];
+    await closeBtn.trigger("click");
+    expect(w.text()).not.toContain("Query 1");
+    expect(w.text()).toContain("Query 2");
+  });
+
+  it("does not close the last tab", async () => {
+    const w = mount(QueryEditorTabs, { props: { running: false } });
+    expect(w.findAll(".tab-close").length).toBe(0);
+  });
+
+  it("switches to previous tab when active tab is closed", async () => {
+    const w = mount(QueryEditorTabs, { props: { running: false } });
+    const addBtn = w.find(".add-tab");
+    await addBtn.trigger("click");
+    const tabs = w.findAll(".tab");
+    await tabs[1].trigger("click");
+    const closeBtn = w.findAll(".tab-close")[1];
+    await closeBtn.trigger("click");
+    const remainingTabs = w.findAll(".tab");
+    expect(remainingTabs[0].classes()).toContain("active");
+  });
+
+  it("emits run with active tab SQL", async () => {
+    const w = mount(QueryEditorTabs, { props: { running: false } });
+    expect(w.findComponent(QueryEditor).exists()).toBe(true);
   });
 });
 

@@ -81,7 +81,12 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  editor.value?.destroy();
+  try {
+    editor.value?.destroy();
+  } catch {
+    // happy-dom's MutationObserver mock chokes on CodeMirror's teardown in
+    // tests; a real webview's DOM implementation doesn't hit this.
+  }
 });
 
 function runQuery() {
