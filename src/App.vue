@@ -563,6 +563,7 @@ onMounted(async () => {
               <QueryEditorTabs
                 ref="queryEditorTabs"
                 :running="queryRunning"
+                :tables="tables"
                 @run="onRunQuery"
               />
               <p

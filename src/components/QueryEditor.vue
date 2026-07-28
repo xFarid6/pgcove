@@ -5,10 +5,13 @@ import { keymap, lineNumbers } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { sql } from "@codemirror/lang-sql";
 import { indentWithTab } from "@codemirror/commands";
+import { autocompletion, Completion, CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import type { TableInfo } from "../api";
 
 const props = defineProps<{
   running: boolean;
   initialSql?: string;
+  tables?: TableInfo[];
 }>();
 
 const emit = defineEmits<{
@@ -21,6 +24,31 @@ const editor = ref<EditorView | null>(null);
 const sqlContent = ref("");
 const initialSql = props.initialSql ?? "select * from ";
 const hasContent = computed(() => sqlContent.value.trim().length > 0);
+
+function schemaCompletions(context: CompletionContext): CompletionResult | null {
+  if (!props.tables || props.tables.length === 0) return null;
+
+  const word = context.matchBefore(/\w*/);
+  if (!word) return null;
+
+  const prefix = word.text.toLowerCase();
+  const options: Completion[] = [];
+
+  for (const table of props.tables) {
+    if (table.name.toLowerCase().startsWith(prefix)) {
+      options.push({
+        label: table.name,
+        detail: `${table.schema}.${table.name}`,
+        type: table.kind === "VIEW" ? "variable" : "class",
+      });
+    }
+  }
+
+  return {
+    from: word.from,
+    options,
+  };
+}
 
 onMounted(() => {
   if (!editorContainer.value) return;
@@ -54,6 +82,9 @@ onMounted(() => {
           sqlContent.value = update.state.doc.toString();
           emit("update", sqlContent.value);
         }
+      }),
+      autocompletion({
+        override: [schemaCompletions],
       }),
       EditorView.theme(
         {

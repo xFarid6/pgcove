@@ -477,6 +477,13 @@ describe("QueryEditor", () => {
     w.vm.editor!.dispatch({ changes: { from: 0, insert: "x" } });
     expect(w.emitted("update")).toBeDefined();
   });
+
+  it("accepts tables prop for autocomplete", () => {
+    const w = mount(QueryEditor, {
+      props: { running: false, tables }
+    });
+    expect(w.vm.$props.tables).toEqual(tables);
+  });
 });
 
 describe("QueryEditorTabs", () => {
@@ -532,6 +539,12 @@ describe("QueryEditorTabs", () => {
   it("emits run with active tab SQL", async () => {
     const w = mount(QueryEditorTabs, { props: { running: false } });
     expect(w.findComponent(QueryEditor).exists()).toBe(true);
+  });
+
+  it("passes tables to QueryEditor for autocomplete", async () => {
+    const w = mount(QueryEditorTabs, { props: { running: false, tables } });
+    const editor = w.findComponent(QueryEditor);
+    expect(editor.props("tables")).toEqual(tables);
   });
 });
 
