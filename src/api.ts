@@ -295,3 +295,17 @@ export const deleteQueryFromHistory = (id: string) =>
 
 export const clearQueryHistory = () =>
   invoke<void>("clear_query_history");
+
+export const importRowsFromFile = (
+  connectionId: string,
+  schema: string,
+  table: string,
+  filePath: string,
+) => invoke<void>("import_rows_from_file", { connectionId, schema, table, filePath });
+
+export const importRows = (
+  connectionId: string,
+  schema: string,
+  table: string,
+  rows: Row[],
+) => invoke<void>("import_rows", { connectionId, schema, table, rows });

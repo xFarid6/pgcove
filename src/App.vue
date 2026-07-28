@@ -292,6 +292,13 @@ async function onEditCell(rowIndex: number, column: string, value: string) {
   }
 }
 
+async function onImportRows() {
+  // Refresh the rows after successful import
+  if (activeTable.value) {
+    await loadRows();
+  }
+}
+
 async function onRunQuery(sql: string) {
   if (!activeId.value) return;
   queryRunning.value = true;
@@ -508,10 +515,14 @@ onMounted(async () => {
             :sort-desc="sortDesc"
             editable
             :pk-columns="pkColumns"
+            :connection-id="activeId ?? undefined"
+            :schema="activeTable?.schema"
+            :table="activeTable?.name"
             @sort="onSort"
             @page="onRowsPage"
             @filter="onRowsFilter"
             @edit="onEditCell"
+            @import="onImportRows"
           />
         </template>
         <template v-else-if="tab === 'structure'">

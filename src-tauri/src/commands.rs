@@ -120,6 +120,13 @@ pub async fn test_connection(app: tauri::AppHandle, id: String) -> Result<String
     db::server_version(&pool).await
 }
 
+/// Health check (ping) — on-demand connection reachability test (issue #33).
+#[tauri::command]
+pub async fn ping_connection(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let pool = pool_for(&app, &id).await?;
+    db::ping(&pool).await
+}
+
 #[tauri::command]
 pub async fn list_tables(
     app: tauri::AppHandle,
@@ -263,6 +270,114 @@ pub async fn execute_ddl(
 ) -> Result<(), String> {
     let pool = pool_for(&app, &connection_id).await?;
     db::execute_ddl(&pool, &sql).await
+}
+
+/// Import rows into a table from a CSV or JSON file (issue #32).
+#[tauri::command]
+pub async fn import_rows_from_file(
+    app: tauri::AppHandle,
+    connection_id: String,
+    schema: String,
+    table: String,
+    file_path: String,
+) -> Result<(), String> {
+    let content = tokio::fs::read_to_string(&file_path)
+        .await
+        .map_err(|e| format!("failed to read file: {}", e))?;
+
+    let rows = if file_path.ends_with(".csv") {
+        parse_csv(&content)?
+    } else if file_path.ends_with(".json") {
+        parse_json(&content)?
+    } else {
+        return Err("unsupported file type — use .csv or .json".to_string());
+    };
+
+    if rows.is_empty() {
+        return Err("no rows to import".to_string());
+    }
+
+    let pool = pool_for(&app, &connection_id).await?;
+    db::insert_rows_batch(&pool, &schema, &table, rows).await
+}
+
+/// Parse CSV content into rows.
+fn parse_csv(content: &str) -> Result<Vec<serde_json::Value>, String> {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let headers = parse_csv_line(lines[0])?;
+    let mut rows = vec![];
+
+    for line in &lines[1..] {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let values = parse_csv_line(line)?;
+        let mut row = serde_json::json!({});
+        for (i, header) in headers.iter().enumerate() {
+            row[header] = serde_json::json!(values.get(i).cloned().unwrap_or_default());
+        }
+        rows.push(row);
+    }
+
+    Ok(rows)
+}
+
+/// Parse a CSV line, handling quoted fields.
+fn parse_csv_line(line: &str) -> Result<Vec<String>, String> {
+    let mut fields = vec![];
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if in_quotes => {
+                if chars.peek() == Some(&'"') {
+                    current.push('"');
+                    chars.next();
+                } else {
+                    in_quotes = false;
+                }
+            }
+            '"' => in_quotes = true,
+            ',' if !in_quotes => {
+                fields.push(current);
+                current = String::new();
+            }
+            _ => current.push(c),
+        }
+    }
+    fields.push(current);
+    Ok(fields)
+}
+
+/// Parse JSON content into rows.
+fn parse_json(content: &str) -> Result<Vec<serde_json::Value>, String> {
+    let data: serde_json::Value =
+        serde_json::from_str(content).map_err(|e| format!("invalid JSON: {}", e))?;
+
+    let arr = data
+        .as_array()
+        .ok_or_else(|| "JSON must be an array of objects".to_string())?;
+
+    Ok(arr.clone())
+}
+
+/// Import rows into a table from parsed data (used when content is pre-parsed).
+#[tauri::command]
+pub async fn import_rows(
+    app: tauri::AppHandle,
+    connection_id: String,
+    schema: String,
+    table: String,
+    rows: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let pool = pool_for(&app, &connection_id).await?;
+    db::insert_rows_batch(&pool, &schema, &table, rows).await
 }
 
 /// Project self-check over HTTP — reachability plus the PostgREST version,
