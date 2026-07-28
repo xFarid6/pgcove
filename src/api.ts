@@ -169,6 +169,35 @@ export interface ErdData {
   foreignKeys: ForeignKey[];
 }
 
+export interface SchemaDiffTable {
+  schema: string;
+  table: string;
+  side: string;
+}
+
+export interface SchemaDiffColumn {
+  schema: string;
+  table: string;
+  column: string;
+  side: string;
+}
+
+export interface SchemaDiffColumnType {
+  schema: string;
+  table: string;
+  column: string;
+  leftType: string;
+  rightType: string;
+}
+
+export interface SchemaDiff {
+  tablesOnlyLeft: SchemaDiffTable[];
+  tablesOnlyRight: SchemaDiffTable[];
+  columnsOnlyLeft: SchemaDiffColumn[];
+  columnsOnlyRight: SchemaDiffColumn[];
+  columnTypeMismatches: SchemaDiffColumnType[];
+}
+
 export const listConnections = () =>
   invoke<ConnectionInfo[]>("list_connections");
 
@@ -221,6 +250,9 @@ export const tableStructure = (connectionId: string, schema: string, table: stri
 
 export const erdData = (connectionId: string, schema: string) =>
   invoke<ErdData>("erd_data", { connectionId, schema });
+
+export const schemaDiff = (leftConnectionId: string, rightConnectionId: string) =>
+  invoke<SchemaDiff>("schema_diff", { leftConnectionId, rightConnectionId });
 
 export const listPolicies = (connectionId: string) =>
   invoke<PolicyInfo[]>("list_policies", { connectionId });

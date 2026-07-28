@@ -6,8 +6,8 @@ use tauri::Manager;
 
 use crate::connections::{self, ConnectionInfo, DbKind};
 use crate::db::{
-    self, AuthUser, Db, ErdData, PolicyDraft, PolicyInfo, RowsPage, RowsQuery, TableInfo,
-    TableStructure,
+    self, AuthUser, Db, ErdData, PolicyDraft, PolicyInfo, RowsPage, RowsQuery, SchemaDiff,
+    TableInfo, TableStructure,
 };
 use crate::migrations::{self, MigrationInfo};
 use crate::queries_history::{self, QueryRecord};
@@ -183,6 +183,17 @@ pub async fn erd_data(
 ) -> Result<ErdData, String> {
     let pool = pool_for(&app, &connection_id).await?;
     db::erd_data(&pool, &schema).await
+}
+
+#[tauri::command]
+pub async fn schema_diff(
+    app: tauri::AppHandle,
+    left_connection_id: String,
+    right_connection_id: String,
+) -> Result<SchemaDiff, String> {
+    let left_db = pool_for(&app, &left_connection_id).await?;
+    let right_db = pool_for(&app, &right_connection_id).await?;
+    db::schema_diff(&left_db, &right_db).await
 }
 
 #[tauri::command]

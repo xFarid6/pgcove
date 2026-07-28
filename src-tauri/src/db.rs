@@ -1188,6 +1188,14 @@ pub struct ErdTable {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SchemaDiffTable {
+    pub schema: String,
+    pub table: String,
+    pub side: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ErdData {
     pub tables: Vec<ErdTable>,
     pub foreign_keys: Vec<ForeignKey>,
@@ -1345,6 +1353,154 @@ pub async fn erd_data(db: &Db, schema: &str) -> Result<ErdData, String> {
             })
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaDiffColumn {
+    pub schema: String,
+    pub table: String,
+    pub column: String,
+    pub side: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaDiffColumnType {
+    pub schema: String,
+    pub table: String,
+    pub column: String,
+    pub left_type: String,
+    pub right_type: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaDiff {
+    pub tables_only_left: Vec<SchemaDiffTable>,
+    pub tables_only_right: Vec<SchemaDiffTable>,
+    pub columns_only_left: Vec<SchemaDiffColumn>,
+    pub columns_only_right: Vec<SchemaDiffColumn>,
+    pub column_type_mismatches: Vec<SchemaDiffColumnType>,
+}
+
+pub async fn schema_diff(left_db: &Db, right_db: &Db) -> Result<SchemaDiff, String> {
+    match left_db {
+        Db::Postgres(_) => {}
+        Db::Sqlite(_) | Db::MySql(_) => {
+            return Err("schema diff is a Postgres/Supabase feature".to_string())
+        }
+    }
+    match right_db {
+        Db::Postgres(_) => {}
+        Db::Sqlite(_) | Db::MySql(_) => {
+            return Err("schema diff is a Postgres/Supabase feature".to_string())
+        }
+    }
+
+    let left_tables = list_tables(left_db).await?;
+    let right_tables = list_tables(right_db).await?;
+
+    let mut tables_only_left = Vec::new();
+    let mut tables_only_right = Vec::new();
+    let mut columns_only_left = Vec::new();
+    let mut columns_only_right = Vec::new();
+    let mut column_type_mismatches = Vec::new();
+
+    let right_table_map = right_tables
+        .iter()
+        .map(|t| (format!("{}.{}", t.schema, t.name), t))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    for left_table in &left_tables {
+        let key = format!("{}.{}", left_table.schema, left_table.name);
+        match right_table_map.get(&key) {
+            Some(_right_table) => {
+                let left_struct =
+                    table_structure(left_db, &left_table.schema, &left_table.name).await?;
+                let right_struct =
+                    table_structure(right_db, &left_table.schema, &left_table.name).await?;
+
+                let right_col_map = right_struct
+                    .columns
+                    .iter()
+                    .map(|c| (c.name.clone(), c))
+                    .collect::<std::collections::HashMap<_, _>>();
+
+                for left_col in &left_struct.columns {
+                    match right_col_map.get(&left_col.name) {
+                        Some(right_col) => {
+                            if left_col.data_type != right_col.data_type {
+                                column_type_mismatches.push(SchemaDiffColumnType {
+                                    schema: left_table.schema.clone(),
+                                    table: left_table.name.clone(),
+                                    column: left_col.name.clone(),
+                                    left_type: left_col.data_type.clone(),
+                                    right_type: right_col.data_type.clone(),
+                                });
+                            }
+                        }
+                        None => {
+                            columns_only_left.push(SchemaDiffColumn {
+                                schema: left_table.schema.clone(),
+                                table: left_table.name.clone(),
+                                column: left_col.name.clone(),
+                                side: "left".to_string(),
+                            });
+                        }
+                    }
+                }
+
+                let left_col_map = left_struct
+                    .columns
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect::<std::collections::HashSet<_>>();
+
+                for right_col in &right_struct.columns {
+                    if !left_col_map.contains(&right_col.name) {
+                        columns_only_right.push(SchemaDiffColumn {
+                            schema: left_table.schema.clone(),
+                            table: left_table.name.clone(),
+                            column: right_col.name.clone(),
+                            side: "right".to_string(),
+                        });
+                    }
+                }
+            }
+            None => {
+                tables_only_left.push(SchemaDiffTable {
+                    schema: left_table.schema.clone(),
+                    table: left_table.name.clone(),
+                    side: "left".to_string(),
+                });
+            }
+        }
+    }
+
+    let left_table_map = left_tables
+        .iter()
+        .map(|t| format!("{}.{}", t.schema, t.name))
+        .collect::<std::collections::HashSet<_>>();
+
+    for right_table in &right_tables {
+        let key = format!("{}.{}", right_table.schema, right_table.name);
+        if !left_table_map.contains(&key) {
+            tables_only_right.push(SchemaDiffTable {
+                schema: right_table.schema.clone(),
+                table: right_table.name.clone(),
+                side: "right".to_string(),
+            });
+        }
+    }
+
+    Ok(SchemaDiff {
+        tables_only_left,
+        tables_only_right,
+        columns_only_left,
+        columns_only_right,
+        column_type_mismatches,
+    })
 }
 
 #[cfg(test)]
@@ -1691,5 +1847,13 @@ mod tests {
         assert_eq!(fk.from_column, "user_id");
         assert_eq!(fk.to_table, "users");
         assert_eq!(fk.to_column, "id");
+    }
+
+    #[tokio::test]
+    async fn schema_diff_sqlite_rejects() {
+        let db = sqlite_memory().await;
+        let result = schema_diff(&db, &db).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Postgres/Supabase"));
     }
 }

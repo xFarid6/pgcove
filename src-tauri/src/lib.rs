@@ -45,6 +45,11 @@ pub fn run() {
             commands::list_query_history,
             commands::delete_query_from_history,
             commands::clear_query_history,
+            commands::import_rows_from_file,
+            commands::import_rows,
+            commands::ping_connection,
+            commands::schema_diff,
+            commands::erd_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
