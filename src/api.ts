@@ -170,6 +170,19 @@ export const listTables = (connectionId: string) =>
 export const tableRows = (connectionId: string, schema: string, table: string, query: RowsQuery) =>
   invoke<RowsPage>("table_rows", { connectionId, schema, table, query });
 
+export const primaryKeyColumns = (connectionId: string, schema: string, table: string) =>
+  invoke<string[]>("primary_key_columns", { connectionId, schema, table });
+
+/** `pk` maps each primary-key column to its current value (as text). */
+export const updateCell = (
+  connectionId: string,
+  schema: string,
+  table: string,
+  pk: Record<string, string | null>,
+  column: string,
+  value: string | null,
+) => invoke<void>("update_cell", { connectionId, schema, table, pk, column, value });
+
 /** Run a single SELECT-shaped statement; other statement kinds are a follow-up. */
 export const runQuery = (connectionId: string, sql: string) =>
   invoke<Row[]>("run_query", { connectionId, sql });

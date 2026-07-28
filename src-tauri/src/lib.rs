@@ -19,6 +19,8 @@ pub fn run() {
             commands::list_tables,
             commands::table_rows,
             commands::table_structure,
+            commands::primary_key_columns,
+            commands::update_cell,
             commands::run_query,
             commands::list_policies,
             commands::create_policy_sql,

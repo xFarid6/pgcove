@@ -12,6 +12,7 @@ import {
   listPolicies,
   listTables,
   migrationStatus,
+  primaryKeyColumns,
   rlsSql,
   runQuery,
   saveConnection,
@@ -23,6 +24,7 @@ import {
   tableRows,
   tableStructure,
   testConnection,
+  updateCell,
   type AdminUser,
   type AuthUser,
   type ConnectionInfo,
@@ -57,6 +59,7 @@ const filterColumn = ref("");
 const filterValue = ref("");
 const structure = ref<TableStructure | null>(null);
 const structureError = ref("");
+const pkColumns = ref<string[]>([]);
 const policies = ref<PolicyInfo[]>([]);
 const authUsers = ref<AuthUser[]>([]);
 const authError = ref("");
@@ -72,6 +75,7 @@ const migrationsRunning = ref(false);
 const tab = ref<"data" | "structure" | "query" | "supabase" | "migrations">("data");
 const status = ref("");
 const error = ref("");
+const editError = ref("");
 const queryRows = ref<Row[]>([]);
 const queryError = ref("");
 const queryRunning = ref(false);
@@ -197,6 +201,8 @@ async function onSelectTable(t: TableInfo) {
 async function loadRows() {
   if (!activeId.value || !activeTable.value) return;
   error.value = "";
+  editError.value = "";
+  pkColumns.value = [];
   try {
     const page = await tableRows(activeId.value, activeTable.value.schema, activeTable.value.name, {
       page: rowsPage.value,
@@ -212,6 +218,17 @@ async function loadRows() {
     error.value = String(e);
     rows.value = [];
     rowsApproxTotal.value = 0;
+  }
+  // Postgres-only (empty array for a table with no PK, error for Sqlite/MySQL)
+  // — degrades to a read-only grid instead of blanking out the rows above.
+  try {
+    pkColumns.value = await primaryKeyColumns(
+      activeId.value,
+      activeTable.value.schema,
+      activeTable.value.name,
+    );
+  } catch {
+    pkColumns.value = [];
   }
 }
 
@@ -236,6 +253,27 @@ function onRowsFilter(column: string, value: string) {
   filterValue.value = value;
   rowsPage.value = 1;
   loadRows();
+}
+
+/** `unknown` row-cell values become the text `update_cell` casts server-side. */
+function toText(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+async function onEditCell(rowIndex: number, column: string, value: string) {
+  if (!activeId.value || !activeTable.value) return;
+  const row = rows.value[rowIndex];
+  const pk: Record<string, string | null> = {};
+  for (const c of pkColumns.value) pk[c] = toText(row[c]);
+  try {
+    await updateCell(activeId.value, activeTable.value.schema, activeTable.value.name, pk, column, value);
+    rows.value[rowIndex] = { ...row, [column]: value };
+    editError.value = "";
+  } catch (e) {
+    editError.value = String(e);
+  }
 }
 
 async function onRunQuery(sql: string) {
@@ -399,19 +437,29 @@ onMounted(refreshConnections);
         >{{ error }}</span>
       </div>
       <template v-if="activeId">
-        <DataGrid
-          v-if="tab === 'data'"
-          :rows="rows"
-          pageable
-          :page="rowsPage"
-          :page-size="rowsPageSize"
-          :approx-total="rowsApproxTotal"
-          :sort-column="sortColumn"
-          :sort-desc="sortDesc"
-          @sort="onSort"
-          @page="onRowsPage"
-          @filter="onRowsFilter"
-        />
+        <template v-if="tab === 'data'">
+          <p
+            v-if="editError"
+            class="error"
+          >
+            {{ editError }}
+          </p>
+          <DataGrid
+            :rows="rows"
+            pageable
+            :page="rowsPage"
+            :page-size="rowsPageSize"
+            :approx-total="rowsApproxTotal"
+            :sort-column="sortColumn"
+            :sort-desc="sortDesc"
+            editable
+            :pk-columns="pkColumns"
+            @sort="onSort"
+            @page="onRowsPage"
+            @filter="onRowsFilter"
+            @edit="onEditCell"
+          />
+        </template>
         <template v-else-if="tab === 'structure'">
           <p
             v-if="structureError"
