@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import type { Row } from "../api";
+import { downloadFile, rowsToCsv, rowsToJson } from "../export";
 
 const props = withDefaults(
   defineProps<{
@@ -47,6 +48,14 @@ function cell(v: unknown): string {
   if (v === null || v === undefined) return "∅";
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
+}
+
+function exportCsv() {
+  downloadFile("export.csv", rowsToCsv(props.rows), "text/csv;charset=utf-8");
+}
+
+function exportJson() {
+  downloadFile("export.json", rowsToJson(props.rows), "application/json;charset=utf-8");
 }
 </script>
 
@@ -95,6 +104,23 @@ function cell(v: unknown): string {
         Next
       </button>
     </div>
+    <div
+      v-if="rows.length > 0"
+      class="export-controls"
+    >
+      <button
+        type="button"
+        @click="exportCsv"
+      >
+        Export CSV
+      </button>
+      <button
+        type="button"
+        @click="exportJson"
+      >
+        Export JSON
+      </button>
+    </div>
     <table v-if="rows.length > 0">
       <thead>
         <tr>
@@ -137,7 +163,8 @@ function cell(v: unknown): string {
   overflow: auto;
   flex: 1;
 }
-.controls {
+.controls,
+.export-controls {
   display: flex;
   gap: 0.4rem;
   align-items: center;
