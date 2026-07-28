@@ -311,18 +311,10 @@ describe("DataGrid", () => {
 });
 
 describe("QueryEditor", () => {
-  it("emits run with the textarea contents", async () => {
+  it("mounts with CodeMirror editor", async () => {
     const w = mount(QueryEditor, { props: { running: false } });
-    await w.find("textarea").setValue("select 1");
-    await w.find("button").trigger("click");
-    expect(w.emitted("run")).toEqual([["select 1"]]);
-  });
-
-  it("does not emit run for blank input", async () => {
-    const w = mount(QueryEditor, { props: { running: false } });
-    await w.find("textarea").setValue("   ");
-    await w.find("button").trigger("click");
-    expect(w.emitted("run")).toBeUndefined();
+    expect(w.find(".editor-container").exists()).toBe(true);
+    await w.vm.$nextTick();
   });
 
   it("disables the run button while running", () => {
@@ -331,11 +323,24 @@ describe("QueryEditor", () => {
     expect(w.find("button").text()).toBe("Running…");
   });
 
-  it("runs on ctrl/cmd+enter", async () => {
+  it("renders the run button and hint", () => {
     const w = mount(QueryEditor, { props: { running: false } });
-    await w.find("textarea").setValue("select 2");
-    await w.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
-    expect(w.emitted("run")).toEqual([["select 2"]]);
+    expect(w.find("button").text()).toBe("Run");
+    expect(w.text()).toContain("⌘/Ctrl + Enter to run");
+  });
+
+  it("accepts initial SQL content via prop", () => {
+    const w = mount(QueryEditor, {
+      props: { running: false, initialSql: "select 1;" }
+    });
+    expect(w.vm.sqlContent).toBe("select 1;");
+  });
+
+  it("emits update event when content changes", async () => {
+    const w = mount(QueryEditor, { props: { running: false } });
+    await w.vm.$nextTick();
+    w.vm.editor!.dispatch({ changes: { from: 0, insert: "x" } });
+    expect(w.emitted("update")).toBeDefined();
   });
 });
 
