@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import QueryEditor from "./QueryEditor.vue";
+import type { TableInfo } from "../api";
 
 interface Tab {
   id: string;
@@ -10,6 +11,7 @@ interface Tab {
 
 defineProps<{
   running: boolean;
+  tables?: TableInfo[];
 }>();
 
 const emit = defineEmits<{
@@ -116,6 +118,7 @@ defineExpose({ loadQuery });
         :key="activeTab.id"
         :running="running"
         :initial-sql="activeTab.sql"
+        :tables="tables"
         @run="onRun"
         @update="updateTabSql"
       />
