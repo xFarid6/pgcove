@@ -9,6 +9,7 @@ use crate::db::{
     self, AuthUser, Db, PolicyDraft, PolicyInfo, RowsPage, RowsQuery, TableInfo, TableStructure,
 };
 use crate::migrations::{self, MigrationInfo};
+use crate::queries_history::{self, QueryRecord};
 use crate::settings::{self};
 use crate::ssh_tunnel::{self, SshTunnels, TunnelHandle};
 use crate::supabase::{AdminUser, EdgeFunction, ProjectInfo, StorageBucket, SupabaseClient};
@@ -147,7 +148,12 @@ pub async fn run_query(
     sql: String,
 ) -> Result<serde_json::Value, String> {
     let pool = pool_for(&app, &connection_id).await?;
-    db::run_query(&pool, &sql).await
+    let result = db::run_query(&pool, &sql).await?;
+
+    // Add to history after successful execution.
+    let _ = queries_history::add_query(&store_dir(&app)?, sql, connection_id);
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -337,4 +343,28 @@ pub fn save_settings(
     settings: crate::settings::AppSettings,
 ) -> Result<(), String> {
     settings::save(&store_dir(&app)?, &settings)
+}
+
+#[tauri::command]
+pub fn add_query_to_history(
+    app: tauri::AppHandle,
+    connection_id: String,
+    sql: String,
+) -> Result<(), String> {
+    queries_history::add_query(&store_dir(&app)?, sql, connection_id)
+}
+
+#[tauri::command]
+pub fn list_query_history(app: tauri::AppHandle) -> Result<Vec<QueryRecord>, String> {
+    queries_history::list_queries(&store_dir(&app)?)
+}
+
+#[tauri::command]
+pub fn delete_query_from_history(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    queries_history::delete_query(&store_dir(&app)?, &id)
+}
+
+#[tauri::command]
+pub fn clear_query_history(app: tauri::AppHandle) -> Result<(), String> {
+    queries_history::clear_queries(&store_dir(&app)?)
 }
