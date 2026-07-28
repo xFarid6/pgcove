@@ -32,6 +32,7 @@ describe("api wrappers", () => {
       password: null,
       serviceKey: null,
       sshSecret: null,
+      mgmtToken: null,
     });
   });
 
@@ -51,6 +52,7 @@ describe("api wrappers", () => {
       password: "dbpass",
       serviceKey: "sk-service",
       sshSecret: null,
+      mgmtToken: null,
     });
   });
 

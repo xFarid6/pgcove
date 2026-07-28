@@ -96,6 +96,16 @@ export interface StorageBucket {
   updatedAt: string;
 }
 
+/** An edge function as returned by the Management API (issue #30). */
+export interface EdgeFunction {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A table row as serialized by Postgres row_to_json. */
 export type Row = Record<string, unknown>;
 
@@ -150,12 +160,14 @@ export const saveConnection = (
   password?: string,
   serviceKey?: string,
   sshSecret?: string,
+  mgmtToken?: string,
 ) =>
   invoke<void>("save_connection", {
     info,
     password: password ?? null,
     serviceKey: serviceKey ?? null,
     sshSecret: sshSecret ?? null,
+    mgmtToken: mgmtToken ?? null,
   });
 
 export const deleteConnection = (id: string) =>
@@ -248,3 +260,6 @@ export const supabaseBanUser = (connectionId: string, userId: string, banDuratio
 
 export const supabaseDeleteUser = (connectionId: string, userId: string) =>
   invoke<void>("supabase_delete_user", { connectionId, userId });
+
+export const supabaseListEdgeFunctions = (connectionId: string) =>
+  invoke<EdgeFunction[]>("supabase_list_edge_functions", { connectionId });

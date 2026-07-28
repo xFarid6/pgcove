@@ -6,6 +6,7 @@ import { computed, ref } from "vue";
 import type {
   AdminUser,
   AuthUser,
+  EdgeFunction,
   PolicyDraft,
   PolicyInfo,
   StorageBucket,
@@ -29,6 +30,9 @@ const props = withDefaults(
     adminUsers?: AdminUser[];
     adminUsersError?: string;
     adminPage?: number;
+    /** Edge functions from the Management API (issue #30). */
+    edgeFunctions?: EdgeFunction[];
+    edgeFunctionsError?: string;
   }>(),
   {
     projectInfo: null,
@@ -38,6 +42,8 @@ const props = withDefaults(
     adminUsers: () => [],
     adminUsersError: "",
     adminPage: 1,
+    edgeFunctions: () => [],
+    edgeFunctionsError: "",
   },
 );
 
@@ -155,16 +161,40 @@ function toggleRls(enable: boolean) {
     </section>
     <section>
       <h2>Edge functions</h2>
-      <!--
-        Honest empty state rather than fake rows: listing edge functions is a
-        Management API call (api.supabase.com) authenticated with a personal
-        access token, which is a different credential from the service-role
-        key this connection stores. Adding that token is the fast-follow to
-        issue #5 — see src-tauri/src/supabase.rs.
-      -->
-      <p class="empty">
-        Listing edge functions needs a Supabase management access token, not the
-        project service-role key — a fast-follow to this feature.
+      <table v-if="edgeFunctions.length > 0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Slug</th>
+            <th>Status</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="f in edgeFunctions"
+            :key="f.id"
+          >
+            <td>{{ f.name }}</td>
+            <td class="expr">
+              {{ f.slug }}
+            </td>
+            <td>{{ f.status }}</td>
+            <td>{{ f.createdAt }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p
+        v-else-if="edgeFunctionsError"
+        class="empty"
+      >
+        {{ edgeFunctionsError }}
+      </p>
+      <p
+        v-else
+        class="empty"
+      >
+        No edge functions, or add a Supabase management access token to see them.
       </p>
     </section>
     <section>
