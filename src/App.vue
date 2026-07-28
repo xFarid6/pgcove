@@ -46,6 +46,7 @@ import DataGrid from "./components/DataGrid.vue";
 import MigrationsPanel from "./components/MigrationsPanel.vue";
 import QueryEditorTabs from "./components/QueryEditorTabs.vue";
 import QueryHistoryPanel from "./components/QueryHistoryPanel.vue";
+import SchemaDiffPanel from "./components/SchemaDiffPanel.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
 import SupabasePanel from "./components/SupabasePanel.vue";
 import TableList from "./components/TableList.vue";
@@ -83,7 +84,7 @@ const adminPage = ref(1);
 const migrations = ref<MigrationInfo[]>([]);
 const migrationsError = ref("");
 const migrationsRunning = ref(false);
-const tab = ref<"data" | "structure" | "query" | "supabase" | "migrations">("data");
+const tab = ref<"data" | "structure" | "query" | "supabase" | "migrations" | "schema-diff">("data");
 const status = ref("");
 const error = ref("");
 const editError = ref("");
@@ -489,6 +490,12 @@ onMounted(async () => {
           Migrations
         </button>
         <button
+          :class="{ active: tab === 'schema-diff' }"
+          @click="tab = 'schema-diff'"
+        >
+          Schema Diff
+        </button>
+        <button
           :disabled="!activeId"
           @click="onTest"
         >
@@ -598,12 +605,16 @@ onMounted(async () => {
           @delete-user="onDeleteUser"
         />
         <MigrationsPanel
-          v-else
+          v-else-if="tab === 'migrations'"
           :migrations="migrations"
           :error="migrationsError"
           :running="migrationsRunning"
           @refresh="onRefreshMigrations"
           @run="onRunMigrations"
+        />
+        <SchemaDiffPanel
+          v-else
+          :connections="connections"
         />
       </template>
       <p
