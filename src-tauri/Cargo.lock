@@ -647,6 +647,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "conn-manager"
+version = "0.1.0"
+source = "git+https://github.com/xFarid6/conn-manager-rs?branch=main#9bddb4f47dd32ecc33ca01055a51a5adcfa68396"
+dependencies = [
+ "keyring",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3172,6 +3182,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "pgcove"
 version = "0.1.0"
 dependencies = [
+ "conn-manager",
  "keyring",
  "rand_core 0.6.4",
  "reqwest 0.12.28",
